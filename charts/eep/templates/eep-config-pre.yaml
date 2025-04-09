@@ -1,0 +1,8 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.global.eepdb.schema.autoManage.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "eep-config-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}
+{{- end }}

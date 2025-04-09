@@ -1,0 +1,38 @@
+enabled: false
+resources:
+  pipelineConfigJob: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    #   ephemeral-storage: "2Gi"
+
+# Optional custom settings for heap management.
+# For example:
+# "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=10000 -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=10 -XX:MaxRAMPercentage=80 -Xlog:gc=info"
+heapFlags:
+
+# The service account for this service
+serviceAccountName:
+
+rabbitmq:
+  release:
+    # The name of the rabbitmq helm release
+    name:
+    # The namespace of the rabbitmq helm release
+    namespace:
+
+solr:
+  release:
+    # The name of the solr helm release
+    name:
+    # The namespace of the solr helm release
+    namespace:
+  # The name of the solr k8s secret
+  secretName: exstream-solr
+
+  # protocol to use for Solr API requests (http or https)
+  protocol: http

@@ -1,0 +1,27 @@
+{{- if .Values.global.squid.enabled -}}
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-service
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ if .Values.metrics }}  
+    prometheus.io/scrape: "true"
+{{ end }}
+{{ include "getServiceAnnotations" . | indent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+spec:
+  type: {{ include "getServiceType" . }}
+  selector:
+    app: {{ .Release.Name }}-{{ .Chart.Name }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 4 }}
+  ports:
+    - protocol: TCP
+      port: {{ .Values.svc.port }}
+      targetPort: {{.Values.svc.targetPort}}
+      name: http
+      {{ include "getNodePortFix" . | indent 6 | trim }}
+{{- end }}

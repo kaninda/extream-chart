@@ -1,0 +1,107 @@
+{{- if .Values.global.squid.enabled -}}
+
+{{- $squidDockerImage:= include "getSquidDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $engineTimeoutMillis := default 12000 .Values.engineTimeoutMillis -}}
+{{- $terminationGracePeriodSeconds := div (add $engineTimeoutMillis 2000 ) 1000 -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" .Chart.Name) -}}  
+{{- $podName := "squid" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-" .Chart.Name)) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/" .Chart.Name "-config.yaml") . | sha256sum }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+    spec:
+      {{- include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      terminationGracePeriodSeconds: {{ $terminationGracePeriodSeconds }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $squidDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.squid | toYaml | indent 12 | trim }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","/home/exstream/src/scripts/init/prestop.sh > /proc/1/fd/1 2>&1"]
+          terminationMessagePolicy: FallbackToLogsOnError
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-{{ .Chart.Name }}-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+{{ if .Values.global.prometheus }}
+            - name: PROMETHEUS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.prometheus.secretName }}
+                  key: {{ .Values.global.prometheus.secretKey }}
+{{ end }}
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "newRelicPodVariables" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+
+          volumeMounts:
+            - mountPath: /var/opt/{{ .Chart.Name }}
+              name: {{ .Chart.Name }}-volume
+              
+          readinessProbe:
+            tcpSocket:              
+              port: {{ .Values.deployment.containerPort }}              
+            {{- include "readinessProbeSettings" . | indent 12 }}
+            initialDelaySeconds: 30
+{{- if not .Values.debugger }}
+          livenessProbe:
+            tcpSocket:
+              port: {{ .Values.deployment.containerPort }}              
+            {{- include "livenessProbeSettings" . | indent 12 }}
+            initialDelaySeconds: 30
+{{- end }}
+              
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+      volumes:
+        - name: {{ .Chart.Name }}-volume
+          configMap:
+            name: {{.Release.Name}}-{{ .Chart.Name }}-config
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end }}

@@ -1,0 +1,121 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.global.eidb.schema.autoManage.enabled }}
+{{- include "beginPreHookAsset" . -}}
+
+{{- if .Values.global.ei.enabled }}
+
+{{- $cxiDockerImage := include "getEiApiDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValueConfigApi := printf "%s-%s-config-api" .Release.Name .Chart.Name -}}
+{{- $appLabelValueCovisintIntegrator := printf "%s-%s-covisint-integrator" .Release.Name .Chart.Name -}}
+{{- $appLabelValueCustomMetadataExtractor := printf "%s-%s-custom-medadata-extractor" .Release.Name .Chart.Name -}}
+{{- $containerName := "config-api-schema-ready" -}}
+{{- $podName := "schema" -}}
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-schema-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "preInstallHookJobAnnotations" . | indent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallSchemaSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" (dict "Values" .Values.api) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "preInstallHookSpecs" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $cxiDockerImage  }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.schema | toYaml | indent 12 | trim }}
+          envFrom: 
+          - configMapRef:
+              name: {{ .Release.Name }}-ei-config-api-config{{ include "preInstallHookNameSuffix" . }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            - name: EXSTREAM_SCHEMA_INIT
+              value: "true"
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: keys
+{{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eidb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eidb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: system-schema-password
+{{- if .Values.global.eidb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eidb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eidb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: schema-management-password
+{{- end }}
+{{- end }}
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+          volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 8 }}
+      {{- include "extraSecretVolume" . | nindent 8 }}
+      {{- include "tempVolume" . | nindent 8 }}
+
+{{- end }}
+
+{{- include "endPreHookAsset" . -}}
+{{- end -}}
+{{- end }}

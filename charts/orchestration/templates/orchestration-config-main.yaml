@@ -1,0 +1,1 @@
+{{ include "orchestration-config-template" . }}

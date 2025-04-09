@@ -1,0 +1,131 @@
+{{- if or .Values.global.assuredDelivery.enabled .Values.global.ei.enabled .Values.global.eep.enabled}}
+{{- $dockerImage := include "getEepDockerImage" . -}}
+{{- $schedule := default "*/60 * * * *" .Values.schedule.cleanup -}}
+{{$dataPeristencePeriod:= default 3 .Values.global.eep.dataPeristencePeriod}}
+{{$cleanupBatchSize:= default 50000 .Values.global.eep.cleanup.batchSize}}
+{{- $containerName := "eep-cache" -}}
+{{- $podName := "cleanupCron" -}}
+
+
+{{- if include "hasCapability" (dict "dot" . "capability" "batch/v1/CronJob") }}
+apiVersion: batch/v1
+{{ else }}
+apiVersion: batch/v1beta1
+{{ end }}
+kind: CronJob
+metadata:
+  name: {{.Release.Name}}-eep-cleanup-cron
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "cronJob") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "cronJob") | nindent 4 }}
+spec:
+  schedule: {{ $schedule | quote }}
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+          namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+          annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 12 }}
+          labels:
+{{ include "getJavaVersionLabels" . | nindent 12 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 12 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+            azure.workload.identity/use: 'true'
+{{- end }}
+        spec:
+        {{- include "imagePullSecrets" . | nindent 10 }}
+        {{ include "getNodeSelector" .Values | nindent 10 }}
+        {{ include "getServiceAccount" .Values | nindent 10 }}
+          securityContext:
+            {{- include "runAsIds" . | nindent 12 }}
+          initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+          containers:
+          - name: {{ $containerName }}
+            image: {{ $dockerImage }}
+            {{- include "imagePullPolicy" . | nindent 12 }}
+            securityContext:
+              {{- include "getReadOnlyRootFilesystemProperty" . | nindent 14 }}
+              {{- include "getDefaultSecurityContextProperties" . | nindent 14 }}
+            resources:
+              {{ .Values.resources.cleanupCron | toYaml | indent 14 | trim }}
+            envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-eep-config
+            env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName "endpoints" (printf "%s/version" (include "EEP_URL_ROOT_BACKEND" .) )) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+{{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eepdb-secret
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eepdb-secret
+                  key: system-schema-password
+{{- if .Values.global.eepdb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eepdb-secret
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-eepdb-secret
+                  key: schema-management-password   
+{{- end }}
+            - name: HIKARI_CONFIG_MIN_IDLE
+              value: "3"
+            - name: HIKARI_CONFIG_MAX_POOL_SIZE
+              value: "3"
+{{- end }}
+            {{- include "oauthEnvSecrets" . | nindent 12 }}
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+            - name: EXSTREAM_RUN_CLEANUP_CRON
+              value: "true"
+            - name: DATA_PERSISTENCE_PERIOD
+              value: {{ $dataPeristencePeriod | quote }}
+            - name: EEP_CLEANUP_BATCH_SIZE
+              value: {{ $cleanupBatchSize | quote }}
+          {{- include "getVaultEnvVarsInEnvVars" (dict "Values" .Values "Release" .Release) | nindent 12 }}
+          {{- include "trustStorePassword" . | nindent 12 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+            volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 12 }}
+          {{- include "extraSecretVolumeMount" . | nindent 12 }}
+          {{- include "tempVolumeMount" . | nindent 12 }}
+
+          {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 10 }}
+
+          volumes:
+          {{- include "trustStoreVolume" . | nindent 10 }}    
+          {{- include "extraSecretVolume" . | nindent 10 }}
+          {{- include "tempVolume" . | nindent 10 }}
+          restartPolicy: Never
+{{- end }}

@@ -1,0 +1,180 @@
+{{- include "beginPreHookAsset" . -}}
+
+{{- if .Values.global.orchestration.enabled -}}
+
+{{- if .Values.schedule.sysCronJob.init -}}
+
+{{- $orcDockerImage := include "getOrcDockerImage" . -}}
+{{- $containerName := "orchestration-cron-job-init" -}}
+{{- $podName := "cron" -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-cron-job-init{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "1") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "preInstallHookSpecs" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $orcDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.orchestration | toYaml | indent 12 | trim }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-orchestration-config{{ include "preInstallHookNameSuffix" . }}
+          env:
+  {{- if .Values.global.readOnlyRootFilesystem }}
+            - name: READ_ONLY_FILESYSTEM
+              value: "true"
+  {{- end }}          
+              {{- include "getS3Properties" . | nindent 12 }}
+            - name: EXSTREAM_CRONJOBS_INIT
+              value: "{{ .Values.schedule.sysCronJob.init}}"
+            - name: EXSTREAM_CRONJOBS_OVERWRITE
+              value: "{{ .Values.schedule.sysCronJob.overwrite}}"              
+            - name: EXSTREAM_CRONJOBS_MARKDELETED_ENABLED  
+              value: "{{ .Values.schedule.sysCronJob.markDeleted.enabled}}"
+            - name: EXSTREAM_CRONJOBS_MARKDELETED_NAME  
+              value: "{{ .Values.schedule.sysCronJob.markDeleted.name}}"
+            - name: EXSTREAM_CRONJOBS_MARKDELETED_CRONEXPRESSION  
+              value: "{{ .Values.schedule.sysCronJob.markDeleted.cronExpression}}"
+            - name: EXSTREAM_CRONJOBS_MARKDELETED_TIMESINCEENDOFJOB
+              value: "{{ .Values.schedule.sysCronJob.markDeleted.timeSinceEndOfJob}}"
+            - name: EXSTREAM_CRONJOBS_CANCEL_ENABLED  
+              value: "{{ .Values.schedule.sysCronJob.cancel.enabled}}"
+            - name: EXSTREAM_CRONJOBS_CANCEL_NAME  
+              value: "{{ .Values.schedule.sysCronJob.cancel.name}}"
+            - name: EXSTREAM_CRONJOBS_CANCEL_CRONEXPRESSION  
+              value: "{{ .Values.schedule.sysCronJob.cancel.cronExpression}}"
+            - name: EXSTREAM_CRONJOBS_CANCEL_TIMESINCESTARTOFJOB
+              value: "{{ .Values.schedule.sysCronJob.cancel.timeSinceStartOfJob}}"
+            - name: EXSTREAM_CRONJOBS_WIPE_ENABLED  
+              value: "{{ .Values.schedule.sysCronJob.wipe.enabled}}"
+            - name: EXSTREAM_CRONJOBS_WIPE_NAME  
+              value: "{{ .Values.schedule.sysCronJob.wipe.name}}"
+            - name: EXSTREAM_CRONJOBS_WIPE_CRONEXPRESSION  
+              value: "{{ .Values.schedule.sysCronJob.wipe.cronExpression}}"
+            - name: EXSTREAM_CRONJOBS_WIPESORTINGASSETS_ENABLED
+              value: "{{ .Values.schedule.sysCronJob.wipeSortingAssets.enabled}}"
+            - name: EXSTREAM_CRONJOBS_WIPESORTINGASSETS_NAME
+              value: "{{ .Values.schedule.sysCronJob.wipeSortingAssets.name}}"
+            - name: EXSTREAM_CRONJOBS_WIPESORTINGASSETS_CRONEXPRESSION
+              value: "{{ .Values.schedule.sysCronJob.wipeSortingAssets.cronExpression}}"
+            - name: EXSTREAM_CRONJOBS_WIPESORTINGASSETS_TIMESINCECREATED
+              value: "{{ .Values.schedule.sysCronJob.wipeSortingAssets.timeSinceCreated}}"
+            - name: EXSTREAM_CRONJOBS_EXPIRESORTINGASSETS_ENABLED
+              value: "{{ .Values.schedule.sysCronJob.expireSortingAssets.enabled}}"
+            - name: EXSTREAM_CRONJOBS_EXPIRESORTINGASSETS_NAME
+              value: "{{ .Values.schedule.sysCronJob.expireSortingAssets.name}}"
+            - name: EXSTREAM_CRONJOBS_EXPIRESORTINGASSETS_CRONEXPRESSION
+              value: "{{ .Values.schedule.sysCronJob.expireSortingAssets.cronExpression}}"
+            - name: EXSTREAM_CRONJOBS_EXPIRESORTINGASSETS_TIMESINCECREATED
+              value: "{{ .Values.schedule.sysCronJob.expireSortingAssets.timeSinceCreated}}"
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: keys
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+{{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: system-schema-password
+{{- if .Values.global.orcdb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret{{ include "preInstallHookNameSuffix" . }}
+                  key: schema-management-password    
+{{- end }}
+{{- end }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+          volumeMounts:
+{{- if eq .Values.global.storage.shared.type "nfs" }}
+{{- if not .Release.IsInstall }}
+          - mountPath: "/mnt/nfs"
+            name: nfs-volume
+{{- end }}
+{{- end }}
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+          {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+{{- if eq .Values.global.storage.shared.type "nfs" }}
+{{- if not .Release.IsInstall }}
+        - name: nfs-volume
+{{ if .Values.global.storage.shared.local.enabled }}
+          hostPath:
+            path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+{{ else }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-shared-storage-pvc
+{{ end }}
+{{- end }}
+{{- end }}
+
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+
+{{- end }}
+{{- end }}
+
+{{- include "endPreHookAsset" . -}}

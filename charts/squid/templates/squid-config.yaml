@@ -1,0 +1,16 @@
+{{- if .Values.global.squid.enabled -}}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  squid.conf: |-
+{{ tpl (.Files.Get "conf/squid.conf") $ | indent 4 }}
+
+{{- end }}

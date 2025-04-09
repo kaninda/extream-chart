@@ -1,0 +1,227 @@
+{{- if .Values.global.ei.enabled }}
+
+{{- $configAPIInternalUrl := printf "%s/api/v1/internal" (include "EI_INTERNAL_URL_ROOT_BACKEND" .)  }}
+{{- $dbNameDictionary := dict "POSTGRES" "postgres" "SQLSERVER" "dbmssql" "ORACLE" "dboracle" }}
+{{- $databaseProfileKey := ternary .Values.global.eidb.externalDb.dbType .Values.global.exstreamdb.dbType .Values.global.eidb.externalDb.enabled }}
+{{- $databaseProfile:= index $dbNameDictionary $databaseProfileKey }}
+{{- $externalDbSchema := .Values.global.eidb.externalDb.schema }}
+{{- $exstreamEIOrcQueue := printf "%s" (include "getRabbitMQOrcEIQueueName" .) -}}
+{{- $exstreamCmeCxiQueue := printf "%s" (include "getCxiExternalEventsQueueName" .) -}}
+{{- $exstreamOtdsUrl := include "OTDS_URL_ROOT_BACKEND" . }}
+{{- $exstreamOrchestrationUrl := include "ORCH_URL_ROOT_BACKEND" . }}
+{{- $exstreamUrlFrontEndEIUrl := include "getEIFrontEndUrl" . }}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+
+---
+
+# covisint-integrator
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-ei-covisint-integrator-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  EXSTREAM_CXI_MODULE: "covisint-integrator"
+  {{- include "databaseConfigMapOptions" .Values.global.eidb | nindent 2 }}
+  {{- include "getHikariConfiguration" . | nindent 2 }}
+  EXSTREAM_SCHEMA_DEFAULT: {{ $externalDbSchema }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "POSTGRES"}}
+  SPRING_DATASOURCE_URL: "{{ include "postgresJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "SQLSERVER"}}
+  SPRING_DATASOURCE_URL: "{{ include "sqlServerJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "ORACLE"}}
+  SPRING_DATASOURCE_URL: "{{ include "oracleJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+  {{- if .Values.global.otds.enabled }}
+  SPRING_PROFILES_ACTIVE: newWorldOTDSAuth,k8s,{{$databaseProfile}}
+  {{- else }}
+  SPRING_PROFILES_ACTIVE: noauth,k8s,{{$databaseProfile}}
+  {{- end }} 
+  OTDS_URL_ROOT_BACKEND: {{ include "OTDS_URL_ROOT_BACKEND" . }}
+  EXSTREAM_CONFIG_API_SVC_URL: {{ $configAPIInternalUrl }}
+  EXSTREAM_CI_RABBITMQ_EXCHANGE_NAME: {{ include "getCiEventsQueueName" . }} #"ci-exstream-events"
+  EXSTREAM_CI_RABBITMQ_QUEUE_NAME: {{ include "getCovisintIntegratorQueueName" . }}  ##"ci-exstream-events-CovisintIntegrator"
+  EXSTREAM_CI_RABBITMQ_ROUTING_KEY: {{ include "getCovisintIntegratorQueueName" . }}  ##"ci-exstream-events-CovisintIntegrator"
+  EXSTREAM_DC_RABBITMQ_EXCHANGE_NAME: {{ include "getCiEventsQueueName" . }}  ##"ci-exstream-events"
+  EXSTREAM_DC_RABBITMQ_QUEUE_NAME: {{ include "getCiCleanupQueueName" . }}  ##"ci-exstream-events-CleanUp"
+  EXSTREAM_DC_RABBITMQ_ROUTING_KEY: {{ include "getCiCleanupQueueName" . }}  ##"ci-exstream-events-CleanUp"
+  EXSTREAM_DC_BATCH_SIZE: "50000"
+  SPRING_RABBITMQ_SCHEME: {{ template "exstreamrabbitScheme" . }}
+  SPRING_RABBITMQ_HOST: {{ template "exstreamrabbitHost" . }}
+  SPRING_RABBITMQ_PORT: {{ template "exstreamrabbitPort" . }}
+  {{ if .Values.global.rabbitmq.vhost }}
+  SPRING_RABBITMQ_VIRTUALHOST: {{ .Values.global.rabbitmq.vhost }}
+  {{ end }}
+  {{ if .Values.global.rabbitmq.useQuorumQueues }}
+  SPRING_RABBITMQ_USEQUORUMQUEUES: "true"
+  {{ end }}
+  {{- if .Values.global.eidb.schema.prefix }}
+  EXSTREAM_SCHEMA_PREFIX: {{.Values.global.eidb.schema.prefix}}
+  {{- end }}
+  EXSTREAM_SCHEMA_MANAGEMENT_AUTO: "{{ required ".Values.global.eidb.schema.autoManage.enabled required" .Values.global.eidb.schema.autoManage.enabled }}"
+  {{- include "trustStoreConfigVariables" . | nindent 2 }} 
+  {{- if .Values.debugger }}
+  EXSTREAM_EI_DEBUG_FLAGS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=10001"
+  {{- end }}
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "getVaultEnvVars" (dict "Values" .Values "serviceName" "ei" "Release" .Release) | nindent 2 }}
+  {{- include "getRabbitMQSecurityVariables" . | nindent 2 }}
+  {{- include "newRelicConfigVariables" (dict "Values" .Values "serviceName" "ei") | nindent 2 }}
+---
+
+# custom-metadata-extractor
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-ei-custom-metadata-extractor-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  EXSTREAM_CXI_MODULE: "custom-metadata-extractor"
+  {{- include "databaseConfigMapOptions" .Values.global.eidb | nindent 2 }}
+  {{- include "getHikariConfiguration" . | nindent 2 }}
+
+  EXSTREAM_SCHEMA_DEFAULT: {{ $externalDbSchema }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "POSTGRES"}}
+  SPRING_DATASOURCE_URL: "{{ include "postgresJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "SQLSERVER"}}
+  SPRING_DATASOURCE_URL: "{{ include "sqlServerJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+  {{- if eq .Values.global.eidb.externalDb.dbType "ORACLE"}}
+  SPRING_DATASOURCE_URL: "{{ include "oracleJdbcUrl" (dict "Values" .Values "url" .Values.global.eidb.externalDb.url) }}"
+  {{- end }}
+
+  SPRING_PROFILES_ACTIVE: k8s,{{$databaseProfile}}
+  EXSTREAM_CME_RABBITMQ_ORC_QUEUE_NAME: {{ $exstreamEIOrcQueue }}
+  EXSTREAM_CME_RABBITMQ_ORC_QUEUE_DURABLE: "true"
+  EXSTREAM_CME_RABBITMQ_ORC_ROUTING_KEY: {{ $exstreamEIOrcQueue }}
+  EXSTREAM_CME_RABBITMQ_ORC_EXCHANGE_NAME: {{ $exstreamEIOrcQueue }}
+  EXSTREAM_CME_RABBITMQ_CXI_QUEUE_NAME: {{ $exstreamCmeCxiQueue }}
+  EXSTREAM_CME_RABBITMQ_CXI_QUEUE_DURABLE: "true"
+  EXSTREAM_CME_RABBITMQ_CXI_ROUTING_KEY: {{ $exstreamCmeCxiQueue }}
+  EXSTREAM_CME_RABBITMQ_CXI_EXCHANGE_NAME: {{ $exstreamCmeCxiQueue }}
+  SPRING_RABBITMQ_SCHEME: {{ template "exstreamrabbitScheme" . }}
+  SPRING_RABBITMQ_HOST: {{ template "exstreamrabbitHost" . }}
+  SPRING_RABBITMQ_PORT: {{ template "exstreamrabbitPort" . }}
+  {{ if .Values.global.rabbitmq.vhost }}
+  SPRING_RABBITMQ_VIRTUALHOST: {{ .Values.global.rabbitmq.vhost }}
+  {{ end }}
+  {{ if .Values.global.rabbitmq.useQuorumQueues }}
+  SPRING_RABBITMQ_USEQUORUMQUEUES: "true"
+  {{ end }}
+  {{- if .Values.global.eidb.schema.prefix }}
+  EXSTREAM_SCHEMA_PREFIX: {{.Values.global.eidb.schema.prefix}}
+  {{- end }}
+  EXSTREAM_SCHEMA_MANAGEMENT_AUTO: "{{ required ".Values.global.eidb.schema.autoManage.enabled required" .Values.global.eidb.schema.autoManage.enabled }}"
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+  {{- if .Values.debugger }}
+  EXSTREAM_EI_DEBUG_FLAGS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=10003"
+  {{- end }}
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "getVaultEnvVars" (dict "Values" .Values "serviceName" "ei" "Release" .Release) | nindent 2 }}
+  {{- include "getRabbitMQSecurityVariables" . | nindent 2 }}
+  {{- include "newRelicConfigVariables" (dict "Values" .Values "serviceName" "ei") | nindent 2 }}
+---
+
+# external-config-provider-cron-configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-ei-config-provider-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  EXSTREAM_CXI_MODULE: "external-config-provider"   
+  EXSTREAM_CI_RABBITMQ_EXCHANGE-NAME: {{ include "getCiEventsQueueName" . }} #"ci-exstream-events"
+  EXSTREAM_CI_RABBITMQ_SCHEME: {{ template "exstreamrabbitScheme" . }}
+  EXSTREAM_CI_RABBITMQ_HOST: {{ template "exstreamrabbitHost" . }}
+  EXSTREAM_CI_RABBITMQ_PORT: {{ template "exstreamrabbitPort" . }}
+  {{ if .Values.global.rabbitmq.vhost }}
+  EXSTREAM_CI_RABBITMQ_VHOST: {{ .Values.global.rabbitmq.vhost }}
+  {{ end }}
+  {{ if .Values.global.rabbitmq.useQuorumQueues }}
+  EXSTREAM_CI_RABBITMQ_USEQUORUMQUEUES: "true"
+  {{ end }}
+  EXSTREAM_CI_RABBITMQ_CONFIG-BLOCKS: "COVISINTINTEGRATOR"
+  EXSTREAM_CI_RABBITMQ_COVISINTINTEGRATOR_QUEUE-NAME: {{ include "getCovisintIntegratorQueueName" . }}  #"ci-exstream-events-CovisintIntegrator"
+  EXSTREAM_CI_RABBITMQ_COVISINTINTEGRATOR_ROUTING-KEY: {{ include "getCovisintIntegratorQueueName" . }}  #"ci-exstream-events-CovisintIntegrator"
+  EXSTREAM_CI_RABBITMQ_COVISINTINTEGRATOR_SOURCE-URL: "{{ $configAPIInternalUrl }}/covisint"
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+  OTDS_URL_ROOT_BACKEND: {{ include "OTDS_URL_ROOT_BACKEND" . }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- if .Values.global.otds.enabled }}
+  SPRING_PROFILES_ACTIVE: newWorldOTDSAuth,k8s,{{$databaseProfile}}
+  {{- else }}
+  SPRING_PROFILES_ACTIVE: noauth,k8s,{{$databaseProfile}}
+  {{- end }}
+  {{- include "getVaultEnvVars" (dict "Values" .Values "serviceName" "ei" "Release" .Release) | nindent 2 }}
+  {{- include "getRabbitMQSecurityVariables" . | nindent 2 }}
+---
+
+# cleanup-config-provider-cron-configmap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-ei-config-provider-cleanup-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  EXSTREAM_CXI_MODULE: "external-config-provider"   
+  EXSTREAM_CI_RABBITMQ_EXCHANGE-NAME: {{ include "getCiEventsQueueName" . }} #"ci-exstream-events"
+  EXSTREAM_CI_RABBITMQ_SCHEME: {{ template "exstreamrabbitScheme" . }}
+  EXSTREAM_CI_RABBITMQ_HOST: {{ template "exstreamrabbitHost" . }}
+  EXSTREAM_CI_RABBITMQ_PORT: {{ template "exstreamrabbitPort" . }}
+  {{ if .Values.global.rabbitmq.vhost }}
+  EXSTREAM_CI_RABBITMQ_VHOST: {{ .Values.global.rabbitmq.vhost }}
+  {{ end }}
+  {{ if .Values.global.rabbitmq.useQuorumQueues }}
+  EXSTREAM_CI_RABBITMQ_USEQUORUMQUEUES: "true"
+  {{ end }}
+  EXSTREAM_CI_RABBITMQ_CONFIG-BLOCKS: "CLEANUP"
+  EXSTREAM_CI_RABBITMQ_CLEANUP_QUEUE-NAME: {{ include "getCiCleanupQueueName" . }}  #"ci-exstream-events-CleanUp"
+  EXSTREAM_CI_RABBITMQ_CLEANUP_ROUTING-KEY: {{ include "getCiCleanupQueueName" . }}  #"ci-exstream-events-CleanUp"
+  EXSTREAM_CI_RABBITMQ_CLEANUP_SOURCE-URL: "{{ $configAPIInternalUrl }}/cleanup"
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+  OTDS_URL_ROOT_BACKEND: {{ include "OTDS_URL_ROOT_BACKEND" . }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- if .Values.global.otds.enabled }}
+  SPRING_PROFILES_ACTIVE: newWorldOTDSAuth,k8s,{{$databaseProfile}}
+  {{- else }}
+  SPRING_PROFILES_ACTIVE: noauth,k8s,{{$databaseProfile}}
+  {{- end }}
+  {{- include "getVaultEnvVars" (dict "Values" .Values "serviceName" "ei" "Release" .Release) | nindent 2 }}
+  {{- include "getRabbitMQSecurityVariables" . | nindent 2 }}
+
+{{- end}}

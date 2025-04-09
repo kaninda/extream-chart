@@ -1,0 +1,395 @@
+{{- if .Values.global.ei.enabled }}
+
+{{- $apiDockerImage := include "getEiApiDockerImage" . -}}
+{{- $ciDockerImage := include "getEiCiDockerImage" . -}}
+{{- $cmeDockerImage := include "getEiCmeDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValueConfigApi := printf "%s-%s-config-api" .Release.Name .Chart.Name -}}
+{{- $appLabelValueCovisintIntegrator := printf "%s-%s-covisint-integrator" .Release.Name .Chart.Name -}}
+{{- $appLabelValueCustomMetadataExtractor := printf "%s-%s-custom-medadata-extractor" .Release.Name .Chart.Name -}}
+{{- $apiContainerName := include "getContainerName" (dict "dot" . "path" "api.deployment.container.name" "defaultValue" "config-api") -}}  
+{{- $integratorContainerName := include "getContainerName" (dict "dot" . "path" "ci.deployment.container.name" "defaultValue" "covisint-integrator") -}}  
+{{- $extractorContainerName := include "getContainerName" (dict "dot" . "path" "cme.deployment.container.name" "defaultValue" "custom-medadata-extractor") -}}  
+{{- $apiPodName := "configApi" -}}
+{{- $covisintIntegratorPodName := "covisintIntegrator" -}}
+{{- $customMedadataExtractorPodName := "customMedadataExtractor" -}}
+
+---
+#Config API
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "api.deployment.name" "defaultValue" (print .Release.Name "-ei-config-api")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.api }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValueConfigApi }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValueConfigApi }}
+{{ include "getJavaVersionLabels" (dict "Values" .Values.api) | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ei-config-api-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/eidb-secret: {{ include (print $.Template.BasePath "/eidb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValueConfigApi) | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $apiContainerName }}
+          image: {{ $apiDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.configApi | toYaml | indent 12 | trim }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-ei-config-api-config
+          env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $apiPodName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $apiPodName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $apiContainerName) | nindent 10 }}
+          - name: KUBERNETES_NAMESPACE
+            value: {{ include "namespaceValue" . }}
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: defaultKey
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: keys
+{{- if include "needDatabaseSecret" . }}
+          - name: SPRING_DATASOURCE_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-eidb-secret
+                key: system-schema-username
+          - name: SPRING_DATASOURCE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-eidb-secret
+                key: system-schema-password
+{{- if .Values.global.eidb.schema.autoManage.enabled }}
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-eidb-secret
+                key: schema-management-username
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-eidb-secret
+                key: schema-management-password
+{{- end }}
+{{- end }}
+          {{- include "oauthEnvSecrets" . | nindent 10 }}
+        {{- include "trustStorePassword" . | nindent 10 }}
+        {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+        {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 12 }}
+          {{- include "tempVolumeMount" . | nindent 12 }}
+          {{- include "extraSecretVolumeMount" . | nindent 12 }}
+
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/ei/actuator/health
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+          {{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/ei/actuator/health
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+          {{- end }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+        {{- include "extraContainers" (dict "dot" . "pod" $apiPodName) | nindent 8 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 8 }}
+      {{- include "tempVolume" . | nindent 8 }}
+      {{- include "extraSecretVolume" . | nindent 8 }}
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+---
+## Covisint Integrator
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "ci.deployment.name" "defaultValue" (print .Release.Name "-ei-covisint-integrator")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.ci }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValueCovisintIntegrator }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValueCovisintIntegrator }}
+{{ include "getJavaVersionLabels" (dict "Values" .Values.ci) | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ei-config2.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/eidb-secret: {{ include (print $.Template.BasePath "/eidb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValueCovisintIntegrator) | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+      - name: {{ $integratorContainerName }}
+        image: {{ $ciDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+        resources:
+          {{ .Values.resources.covisintIntegrator | toYaml | indent 10 | trim }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-ei-covisint-integrator-config
+        {{- include "newRelicConfigMapRef" . | nindent 8 }}
+        env:
+        {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $covisintIntegratorPodName "endpoints" (printf "%s/version" (include "EI_URL_ROOT_BACKEND" .) )) | nindent 8 }}
+        {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $covisintIntegratorPodName) | nindent 8 }}
+        {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $integratorContainerName) | nindent 8 }}
+        - name: ENCRYPTION_DEFAULTKEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: defaultKey
+        - name: ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: keys
+{{- if include "needDatabaseSecret" . }}
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eidb-secret
+              key: system-schema-username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eidb-secret
+              key: system-schema-password
+{{- end }}
+        {{- include "rabbitSecrets" . | nindent 8 }}
+        {{- include "oauthEnvSecrets" . | nindent 8 }}
+
+        - name: KUBERNETES_NAMESPACE
+          value: {{ include "namespaceValue" . }}
+
+        {{- include "trustStorePassword" . | nindent 8 }}
+        {{- include "extraEnvironmentVars" .Values | nindent 8 }}
+        {{- include "newRelicPodVariables" . | nindent 8 }}
+        {{- include "getAzureKeyVaultProperties" . | nindent 8 }}
+        volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 8 }}
+          {{- include "extraSecretVolumeMount" . | nindent 8 }}
+          {{- include "tempVolumeMount" . | nindent 8 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 8 }}
+        readinessProbe:
+          exec:
+            command: ['/home/exstream/scripts/check-ci.sh', '300']
+          {{- include "readinessProbeSettings" . | indent 10 }}
+        {{- if not .Values.debugger }}
+        livenessProbe:
+          exec:
+            command: ['/home/exstream/scripts/check-ci.sh', '300']
+          {{- include "livenessProbeSettings" . | indent 10 }}
+        {{- end }}
+      {{- include "extraContainers" (dict "dot" . "pod" $covisintIntegratorPodName) | nindent 6 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 6 }}
+      {{- include "extraSecretVolume" . | nindent 6 }}
+      {{- include "tempVolume" . | nindent 6 }}
+      {{- include "rabbitmqSecretVolume" . | nindent 6 }}
+
+---
+## Custom Metadata Extractor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "cme.deployment.name" "defaultValue" (print .Release.Name "-ei-custom-medadata-extractor")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount.cme }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValueCustomMetadataExtractor }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValueCustomMetadataExtractor }}
+{{ include "getJavaVersionLabels" (dict "Values" .Values.cme) | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/ei-config2.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/eidb-secret: {{ include (print $.Template.BasePath "/eidb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValueCustomMetadataExtractor) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+      - name: {{ $extractorContainerName }}
+        image: {{ $cmeDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+        resources:
+          {{ .Values.resources.customMedadataExtractor | toYaml | indent 10 | trim }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-ei-custom-metadata-extractor-config
+        {{- include "newRelicConfigMapRef" . | nindent 8 }}
+        env:
+        {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $customMedadataExtractorPodName "endpoints" (printf "%s/version" (include "EI_URL_ROOT_BACKEND" .) )) | nindent 8 }}
+        {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $customMedadataExtractorPodName) | nindent 8 }}
+        {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $extractorContainerName) | nindent 8 }}
+        - name: ENCRYPTION_DEFAULTKEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: defaultKey
+        - name: ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: keys
+{{- if include "needDatabaseSecret" . }}
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eidb-secret
+              key: system-schema-username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eidb-secret
+              key: system-schema-password
+{{- end }}
+        {{- include "rabbitSecrets" . | nindent 8 }}
+        - name: KUBERNETES_NAMESPACE
+          value: {{ include "namespaceValue" . }}
+        {{- include "trustStorePassword" . | nindent 8 }}
+        {{- include "extraEnvironmentVars" .Values | nindent 8 }}
+        {{- include "newRelicPodVariables" . | nindent 8 }}
+        {{- include "getAzureKeyVaultProperties" . | nindent 8 }}
+        volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 8 }}
+          {{- include "extraSecretVolumeMount" . | nindent 8 }}
+          {{- include "tempVolumeMount" . | nindent 8 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 8 }}
+        readinessProbe:
+          exec:
+            command: ['/home/exstream/scripts/check-cme.sh', '300']
+          {{- include "readinessProbeSettings" . | indent 10 }}
+        {{- if not .Values.debugger }}
+        livenessProbe:
+          exec:
+            command: ['/home/exstream/scripts/check-cme.sh', '300']
+          {{- include "livenessProbeSettings" . | indent 10 }}
+        {{- end }}
+      {{- include "extraContainers" (dict "dot" . "pod" $customMedadataExtractorPodName) | nindent 6 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 6 }}
+      {{- include "extraSecretVolume" . | nindent 6 }}
+      {{- include "tempVolume" . | nindent 6 }}
+      {{- include "rabbitmqSecretVolume" . | nindent 6 }}
+
+{{- end }}

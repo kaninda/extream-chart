@@ -1,0 +1,101 @@
+{{- if .Values.global.batch.enabled }}
+
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $exstreamUrlFrontEndUrl := include "getBatchFrontEndUrl" . }}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-batch-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  RUN_AS_BATCH_SERVICE: "true"
+  SERVER_SERVLET_CONTEXT_PATH: "{{$context}}/batch"
+  ENABLE_AUDIT: "false"
+  DAS_URL: "{{ include "DAS_URL_ROOT_BACKEND" . }}/api/v1"
+  DAS_INTERNAL_URL: "{{ include "DAS_URL_ROOT_BACKEND_INTERNAL" . }}"
+  EXSTREAM_URL_FRONTEND_BATCH_URL: {{ $exstreamUrlFrontEndUrl }}
+  {{ if .Values.global.empower.enabled }}
+  EMPOWER_URL: {{ include "EMPOWER_URL_ROOT_BACKEND" . }}
+  EMPOWER_EXTERNAL_URL: "http://{{ include "getExstreamFrontEndIngressUrl" . }}"
+  {{ end }}
+  {{ if .Values.global.orchestration.enabled }}
+  ORC_URL: "{{ include "ORC_URL_ROOT_BACKEND_INTERNAL" . }}/api/v1"
+  ORC_INTERNAL_URL: "{{ include "ORC_URL_ROOT_BACKEND_INTERNAL" . }}/internal/v1"
+  {{ end }}
+  {{- include "getDocGenOtdsConfiguration" . | nindent 2 }}
+  {{- include "getEtsConfiguration" . | nindent 2 }}
+  {{- include "getOT2ApplicationsConfiguration" . | nindent 2 }}
+  {{- include "sharedStorageUmaskEnv" . | nindent 2 }}
+  {{ if .Values.tracing.enabled }}
+  ENABLE_TRACING: "true"
+  {{ if .Values.tracing.endpoint }}
+  TRACING_URL: {{ .Values.tracing.endpoint }}
+  {{ end }}
+  {{ end }}
+  EXSTREAM_CLEAN_UP_MAX_AGE_MILLIS: "{{ default "604800000" .Values.schedule.maxAgeMillis }}"
+  EXSTREAM_STORAGE_SHARED: {{ .Values.global.storage.shared.type }}
+  {{ if eq .Values.global.storage.shared.type "s3" }}
+  DAS_RESOURCES_PATH: "share/dasresources"
+  ENGINES_PATH: "share/SYSTEM/cache/engines"
+  BATCH_PATH: "share"
+  TENANTS_PATH: "share"  
+  LOCAL_BATCH_PATH: {{ include "docgenStorageMountPath" . }}
+  LOCAL_DAS_RESOURCES_PATH: {{ include "docgenStorageMountPath" . }}/dasresources
+  LOCAL_ENGINES_PATH: {{ include "docgenStorageMountPath" . }}/SYSTEM/cache/engines
+  LOCAL_TENANTS_PATH: {{ include "docgenStorageMountPath" . }}
+  NUM_RUNS: "{{ .Values.global.storage.shared.s3.numRuns }}"
+  {{ end }}
+  {{ if eq .Values.global.storage.shared.type "nfs" }}
+  DAS_RESOURCES_PATH: "/mnt/nfs/dasresources"
+  ENGINES_PATH: "/mnt/nfs/SYSTEM/cache/engines"
+  BATCH_PATH: "/mnt/nfs"
+  TENANTS_PATH: "/mnt/nfs"
+  {{ end }}
+  EXSTREAM_BATCH_LISTENER_DISABLED: "false"
+  {{ if .Values.debugger }}
+  EXSTREAM_DEBUG_FLAGS: "--inspect=0.0.0.0:9229"
+  NODE_DEBUG: request,http,http2
+  {{ end }}
+  
+  SHM_PATH: "/dev/shm"
+  
+  {{- include "configMapNodeLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  RABBIT_SCHEME: {{ template "exstreamrabbitScheme" . }}
+  RABBIT_SERVICE: {{ template "exstreamrabbitHost" . }}
+  RABBIT_PORT: {{ template "exstreamrabbitPort" . }}
+  {{ if .Values.global.rabbitmq.vhost }}
+  RABBIT_VHOST: {{ .Values.global.rabbitmq.vhost }}
+  {{ end }}
+  {{ if .Values.global.rabbitmq.useQuorumQueues }}
+  RABBIT_USE_QUORUM_QUEUES: "true"
+  {{ end }}
+  SCHEMA_VALIDATION: "true"
+  {{ if .Values.global.rabbitmq.frameMax }}
+  RABBIT_FRAME_MAX: "{{ .Values.global.rabbitmq.frameMax | int }}"
+  {{- else }}
+  RABBIT_FRAME_MAX: "131072"
+  {{ end }}
+  {{ if .Values.allowedOrigins }}
+  EXSTREAM_ALLOWED_ORIGINS: "{{.Values.allowedOrigins}}"
+  {{ end }}
+  {{ if .Values.contentSecurityPolicy }}
+  EXSTREAM_CONTENT_SECURITY_POLICY: "{{.Values.contentSecurityPolicy}}"
+  {{ end }}
+
+  BATCH_QUEUE_NAME: "{{ include "getRabbitMQBatchQueueName" . }}"
+  BATCH_CANCELLATION_QUEUE_NAME: "{{ include "getRabbitMQBatchCancelationQueueName" . }}"
+  EXSTREAM_ORC_QUEUE: "{{ include "getRabbitMQOrcQueueName" . }}"
+  EXSTREAM_SPS_QUEUE: "{{ include "getRabbitMQSPSQueueName" . }}"
+  TERMINATION_SERVER_DELAY_MILLIS: "{{ .Values.termination.server.delay.millis }}"
+
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+  {{- include "newRelicConfigVariables" (dict "Values" .Values "serviceName" "batch") | nindent 2 }}
+  {{- include "getVaultEnvVars" (dict "Values" .Values "serviceName" "batch" "Release" .Release) | nindent 2 }}
+  {{- include "getRabbitMQSecurityVariables" . | nindent 2 }}
+{{- end }}

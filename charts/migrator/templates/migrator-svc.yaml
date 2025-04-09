@@ -1,0 +1,26 @@
+{{- if .Values.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-migrator-service
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ if .Values.metrics }}
+    prometheus.io/scrape: "true"
+{{ end }}
+{{ include "getServiceAnnotations" . | indent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+spec:
+  type: {{ include "getServiceType" . }}
+  selector:
+    app: {{ .Release.Name }}-migrator
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 4 }}
+  ports:
+  - protocol: "TCP"
+    port: {{ .Values.svc.port }}
+    targetPort: {{.Values.svc.targetPort}}
+    name: http
+    {{ include "getNodePortFix" . | indent 4 | trim }}
+{{- end }}

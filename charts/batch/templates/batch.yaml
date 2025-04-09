@@ -1,0 +1,154 @@
+{{- if .Values.global.batch.enabled -}}
+
+{{- $docgenDockerImage:= include "getBatchDocgenDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $terminationGracePeriodSeconds := default 28800 .Values.terminationGracePeriodSeconds -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "batch") -}}  
+{{- $podName := "batch" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-batch")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/batch-config.yaml") . | sha256sum }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{- include "getNodeSelector" .Values | nindent 6 }}
+      {{- include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "sharedStorageRunAsIds" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $terminationGracePeriodSeconds }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $docgenDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.batch | toYaml | indent 12 | trim }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh","-c","/home/exstream/src/scripts/init/prestop.sh > /proc/1/fd/1 2>&1"]
+          terminationMessagePolicy: FallbackToLogsOnError
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          volumeMounts:
+          {{- if eq .Values.global.storage.shared.type "nfs"}}
+          - mountPath: "/mnt/nfs"
+            name: nfs-volume
+          {{- end }}
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+          {{- include "docgenVolumeMount" . | nindent 10 }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-batch-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName "endpoints" (printf "%s/version" (include "DAS_URL_ROOT_BACKEND" .) )) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            {{- include "getS3Properties" . | nindent 12 }}
+            - name: TERMINATION_GRACE_PERIOD_SECONDS
+              value: "{{ $terminationGracePeriodSeconds }}"
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{- include "rabbitSecretsDocGen" . | nindent 12 }}
+            {{- include "oauthEnvSecretsCustomNames" (dict "dot" . "idName" "OAUTH2_CLIENT_ID" "secretName" "OAUTH2_CLIENT_SECRET" ) | nindent 12 }}
+{{ if .Values.global.prometheus }}
+            - name: PROMETHEUS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.prometheus.secretName }}
+                  key: {{ .Values.global.prometheus.secretKey }}
+{{ end }}
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "newRelicPodVariables" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/{{ .Chart.Name }}/health/ready
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+{{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/batch/version
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+{{- end }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+{{ if eq .Values.global.storage.shared.type "nfs"}}
+        - name: nfs-volume
+{{ if .Values.global.storage.shared.local.enabled }}
+          hostPath:
+            path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+{{ else }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-shared-storage-pvc
+{{ end }}
+{{ end }}
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "rabbitmqSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+        {{- include "docgenVolume" . | nindent 8 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end }}
+
+      

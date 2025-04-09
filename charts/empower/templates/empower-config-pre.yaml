@@ -1,0 +1,6 @@
+{{- if or (and .Values.global.schema.upgrade.job.enabled .Values.global.empowerdb.schema.autoManage.enabled) .Values.global.empower.editor.upload.job.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "empower-config-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,163 @@
+{{- if or .Values.global.assuredDelivery.enabled .Values.global.ei.enabled .Values.global.eep.enabled}}
+
+{{- $eepDockerImage := include "getEepDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "eep") -}}  
+{{- $podName := "eep" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-eep")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/eep-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/eepdb-secret: {{ include (print $.Template.BasePath "/eepdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      securityContext:
+        {{- include "sharedStorageRunAsIds" . | nindent 8 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $eepDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+        resources:
+          {{ .Values.resources.eep | toYaml | indent 10 | trim }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-eep-config
+        {{- include "newRelicConfigMapRef" . | nindent 8 }}
+        env:
+        {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 8 }}
+        {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 8 }}
+        {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 8 }}
+        {{- include "getS3Properties" . | nindent 8 }}        
+        - name: ENCRYPTION_DEFAULTKEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: defaultKey
+        - name: ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-keys-secret
+              key: keys
+{{- if include "needDatabaseSecret" . }}
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eepdb-secret
+              key: system-schema-username
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eepdb-secret
+              key: system-schema-password
+{{- if .Values.global.eepdb.schema.autoManage.enabled }}
+        - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eepdb-secret
+              key: schema-management-username
+        - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Release.Name }}-eepdb-secret
+              key: schema-management-password
+{{- end }}
+{{- end }}
+        {{- include "rabbitSecrets" . | nindent 8 }}
+        {{- include "oauthEnvSecrets" . | nindent 8 }}
+        - name: KUBERNETES_NAMESPACE
+          value: {{ include "namespaceValue" . }}
+        - name: SERVER_PORT
+          value: {{ .Values.eep.svc.port | quote }}
+        {{- include "trustStorePassword" . | nindent 8 }}
+        {{- include "extraEnvironmentVars" .Values | nindent 8 }}
+        {{- include "newRelicPodVariables" . | nindent 8 }}
+        {{- include "getAzureKeyVaultProperties" . | nindent 8 }}
+        ports:
+          - containerPort: {{ .Values.deployment.containerPort }}
+        volumeMounts:
+{{- if eq .Values.global.storage.shared.type "nfs"}}
+        - name: nfs-volume
+          mountPath: "/mnt/nfs"
+{{- end }}
+          {{- include "trustStoreVolumeMount" . | nindent 8 }}
+          {{- include "tempVolumeMount" . | nindent 8 }}
+          {{- include "extraSecretVolumeMount" . | nindent 8 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 8 }}
+        readinessProbe:
+          httpGet:
+            path: {{$context}}/eep/actuator/health
+            port: {{ .Values.deployment.containerPort }}
+          {{- include "readinessProbeSettings" . | indent 10 }}
+{{- if not .Values.debugger }}
+        livenessProbe:
+          httpGet:
+            path: {{$context}}/eep/actuator/health
+            port: {{ .Values.deployment.containerPort }}
+          {{- include "livenessProbeSettings" . | indent 10 }}
+{{- end }}
+        {{- include "extraContainerProperties" .Values | nindent 8 }}
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 6 }}
+      {{- include "tempVolume" . | nindent 6 }}
+      {{- include "extraSecretVolume" . | nindent 6 }}
+      {{- include "rabbitmqSecretVolume" . | nindent 6 }}
+      {{- if eq .Values.global.storage.shared.type "nfs"}}
+      - name: nfs-volume
+      {{- if .Values.global.storage.shared.local.enabled }}
+        hostPath:
+          path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+      {{- else }}
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-shared-storage-pvc
+      {{- end }}
+      {{- end }}
+    {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+      
+{{- end}}

@@ -1,0 +1,128 @@
+{{- if .Values.global.empower.editor.upload.job.enabled }}
+{{- include "beginPreHookAsset" . -}}
+
+{{- if .Values.global.empower.enabled -}}
+
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $empowerDockerImage:= include "getEmpowerDockerImage" . -}}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $containerName := "empower-editor-upload" -}}
+{{- $podName := "editorUpload" -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-editor-upload-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "preInstallHeavyHookJobAnnotations" . | indent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "preInstallHookSpecs" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $empowerDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+        resources:
+          {{ .Values.resources.editorUploadJob | toYaml | indent 10 | trim }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-empower-config{{ include "preInstallHookNameSuffix" . }}
+        env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 10 }}
+          - name: EMPOWER_EDITOR_UPLOAD
+            value: "true"
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                key: keys
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                key: defaultKey
+{{- if include "needDatabaseSecret" . }}
+          - name: SHARED_JDBC_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: shared-schema-username
+          - name: SHARED_JDBC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: shared-schema-password
+          - name: SYSTEM_JDBC_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: system-schema-username
+          - name: SYSTEM_JDBC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: system-schema-password
+{{- if .Values.global.empowerdb.schema.autoManage.enabled }}
+          - name: SCHEMA_MANAGEMENT_USERID
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: schema-management-username
+          - name: SCHEMA_MANAGEMENT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret{{ include "preInstallHookNameSuffix" . }}
+                key: schema-management-password
+{{- end }}
+{{- end }}
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+
+        volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+      volumes:
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+
+{{- end }}
+
+{{- include "endPreHookAsset" . -}}
+{{- end }}

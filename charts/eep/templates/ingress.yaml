@@ -1,0 +1,46 @@
+{{- if (include "digChartOrGlobalValue" (list "ingress" "enabled" "true" .Values)) }}
+{{- if or .Values.global.assuredDelivery.enabled .Values.global.ei.enabled .Values.global.eep.enabled}}
+{{- $pathPrefix := include "getFrontEndUrlContextWithTrailingSlash" . }}
+{{- if include "hasCapability" (dict "dot" . "capability" "networking.k8s.io/v1/Ingress") }}
+apiVersion: networking.k8s.io/v1
+{{ else }}
+apiVersion: extensions/v1beta1
+{{ end }}
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-eep-ingress
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{- include "ingressAnnotations" . | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "ingress") | nindent 4 }}    
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "ingress") | nindent 4 }}
+spec:
+{{- include "ingressClassName" . | nindent 2 }}
+{{- if .Values.global.tls.enabled }}
+  tls:
+  - hosts: 
+    - {{ .Values.global.ingress.hostname }}
+    secretName: {{ template "tlsCertName" . }} 
+{{- end }}
+  rules:
+    - host: {{ .Values.global.ingress.hostname }}
+      http:
+        paths:
+        - path: /{{ $pathPrefix }}{{ required "A .Values.ingress.apiPathName is required" .Values.ingress.apiPathName }}/
+          backend:
+
+{{- if include "hasCapability" (dict "dot" . "capability" "networking.k8s.io/v1/Ingress") }}
+            service:
+              name: {{ .Release.Name }}-eep-service
+              port:
+                number: {{ .Values.eep.svc.port }}
+          pathType: Prefix
+{{ else }}
+            serviceName: {{ .Release.Name }}-eep-service
+            servicePort: {{ .Values.eep.svc.port }}
+{{ end }}
+
+       
+{{- end }}
+{{- end }}

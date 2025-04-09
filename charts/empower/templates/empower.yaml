@@ -1,0 +1,167 @@
+{{- if .Values.global.empower.enabled -}}
+
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $empowerDockerImage:= include "getEmpowerDockerImage" . -}}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "empowerservice") -}}  
+{{- $podName := "empower" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-empower")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/empower-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/empowerdb-secret: {{ include (print $.Template.BasePath "/empowerdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{- include "getNodeSelector" .Values | nindent 6 }}
+      {{- include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $empowerDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+        resources:
+          {{ .Values.resources.empower | toYaml | indent 10 | trim }}
+        ports:
+        - containerPort: {{ .Values.deployment.containerPort }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-empower-config
+        {{- include "newRelicConfigMapRef" . | nindent 8 }}
+        env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 10 }}
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: keys
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: defaultKey
+{{- if include "needDatabaseSecret" . }}
+          - name: SHARED_JDBC_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: shared-schema-username
+          - name: SHARED_JDBC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: shared-schema-password
+          - name: SYSTEM_JDBC_USER
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: system-schema-username
+          - name: SYSTEM_JDBC_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: system-schema-password
+{{- if .Values.global.empowerdb.schema.autoManage.enabled }}
+          - name: SCHEMA_MANAGEMENT_USERID
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: schema-management-username
+          - name: SCHEMA_MANAGEMENT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-empowerdb-secret
+                key: schema-management-password
+{{- end }}
+{{- end }}
+          {{- include "oauthEnvSecretsCustomNames" (dict "dot" . "idName" "OAUTH2_CLIENT_ID" "secretName" "OAUTH2_CLIENT_SECRET" ) | nindent 10 }}
+{{- if include "dig" (list "gcp" "ai" "enabled" false .Values) }}
+          - name: GCP_AI_ENABLED
+            value: {{ .Values.gcp.ai.enabled | quote }}
+{{- end }}
+{{ if .Values.global.prometheus }}
+          - name: PROMETHEUS_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.global.prometheus.secretName }}
+                key: {{ .Values.global.prometheus.secretKey }}
+{{ end }}
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "newRelicPodVariables" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+
+        readinessProbe:
+          httpGet:
+            path: {{$context}}/empower/actuator/health
+            port: {{ .Values.deployment.containerPort }}
+          {{- include "readinessProbeSettings" . | indent 10 }}
+{{- if not .Values.debugger }}
+        livenessProbe:
+          httpGet:
+            path: {{$context}}/empower/actuator/health
+            port: {{ .Values.deployment.containerPort }}
+          {{- include "livenessProbeSettings" . | indent 10 }}
+{{- end }}
+        volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+
+        {{- include "extraContainerProperties" .Values | nindent 8 }}
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+      volumes:
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end }}
+
+

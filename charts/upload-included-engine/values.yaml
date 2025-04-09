@@ -1,0 +1,19 @@
+# Umbrella chart's parent values will override subchart's values 
+# Since the sub chart is considered standalone , it cannot access parent chart values
+
+storage:    
+  tempVolume: {}
+    # sizeLimit: "5Gi"
+
+# Helm recommends not specifying default resources and to leave this as a
+# conscious choice for the user.
+resources:
+  uploadJob: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    #   ephemeral-storage: "1Gi"

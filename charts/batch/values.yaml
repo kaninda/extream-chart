@@ -1,0 +1,84 @@
+# Umbrella chart's parent values will override subchart's values 
+# Since the sub chart is considered standalone , it cannot access parent chart values
+allowedOrigins:
+contentSecurityPolicy:
+licensing: false
+metrics: false
+tracing:
+  enabled: true
+  endpoint:
+deployment: 
+  containerPort: 8000
+#  # optionally specify deployment and container names.
+#  container:
+#    name:
+#  name:
+svc: 
+  port: 8100
+  targetPort: 8000
+
+# Allow a default of 30 seconds for the grace period to account for new guideline
+# to keep handling requests while the k8s cluster marks the pod as non-ready.
+termination:
+  server:
+    delay:
+      millis: 30000
+
+replicaCount: 1
+
+# Configures the strategy Deployments use to replace old Pods with new ones. Can 
+# be set to RollingUpdate or Recreate. 
+# 
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+updateStrategy: RollingUpdate
+
+# Optional values that can be set when using a RollingUpdate strategy for Deployments.
+# Can be an absolute number or a percentage of desired Pods.
+#
+# Note: maxUnavailable and maxSurge cannot both be set to 0
+#
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-unavailable
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-surge
+# rollingUpdate:
+#   maxUnavailable: 25%
+#   maxSurge: 25%
+
+storage:    
+  tempVolume: {}
+    # sizeLimit: "5Gi"
+
+livenessProbe:
+  default:
+    failureThreshold: 10
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+readinessProbe:
+  default:
+    initialDelaySeconds: 20
+    periodSeconds: 10
+
+# Helm recommends not specifying default resources and to leave this as a
+# conscious choice for the user.
+resources:
+  batch: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "5Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "10Gi"
+    #   ephemeral-storage: "1Gi"
+  cleanupCron: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    #   ephemeral-storage: "1Gi"

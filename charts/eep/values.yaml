@@ -1,0 +1,115 @@
+# Umbrella chart's parent values will override subchart's values 
+# Since the sub chart is considered standalone , it cannot access parent chart values
+schedule:
+  event: "" #expects a cron like */10 * * * *
+  cleanup: "" #expects a cron like */50 * * * *
+
+consolidation:
+  interval: "*/5 * * * *"
+  timeout: 7200 #in seconds
+
+deployment: 
+  containerPort: 8091
+#  # optionally specify deployment and container names.
+#  container:
+#    name:
+#  name:
+
+eep:
+    svc: 
+      port: 8091
+      targetPort: 8091
+      
+config:
+  api:
+    svc: 
+      port: 8041
+
+ingress: 
+  apiPathName: eep
+
+versions:
+  jdkVersion: "17.0.13"
+  springBootVersion: "3.3.7"
+
+local: false
+debugger: false
+metrics: false
+
+# Configures the strategy Deployments use to replace old Pods with new ones. Can 
+# be set to RollingUpdate or Recreate. 
+# 
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+updateStrategy: RollingUpdate
+
+# Optional values that can be set when using a RollingUpdate strategy for Deployments.
+# Can be an absolute number or a percentage of desired Pods.
+#
+# Note: maxUnavailable and maxSurge cannot both be set to 0
+#
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-unavailable
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-surge
+# rollingUpdate:
+#   maxUnavailable: 25%
+#   maxSurge: 25%
+
+replicaCount: 1
+allowedOrigins:
+contentSecurityPolicy:
+
+# Optional custom settings for heap management.
+# For example:
+# "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=10000 -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=10 -XX:MaxRAMPercentage=80 -Xlog:gc=info"
+heapFlags:
+
+livenessProbe:
+  default:
+    failureThreshold: 5
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+readinessProbe:
+  default:
+    failureThreshold: 2
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+# Helm recommends not specifying default resources and to leave this as a 
+# conscious choice for the user.
+resources:
+  eep: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+  schema: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+  cron: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "0.5Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "1Gi"
+  cleanupCron: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "0.5Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "1Gi"
+
+storage:
+  tempVolume: {}
+  # sizeLimit: "5Gi"

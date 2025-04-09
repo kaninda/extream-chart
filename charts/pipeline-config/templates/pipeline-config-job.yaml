@@ -1,0 +1,164 @@
+{{- if .Release.IsInstall -}}
+{{- if .Values.enabled -}}
+
+{{- include "beginPreHookAsset" . -}}
+
+{{- $dasDockerImage:= include "getDesignDockerImage" . -}}
+{{- $containerName := "pipeline-config" -}}
+{{- $podName := "pipelineConfigJob" -}}
+
+{{- $postgresDbPlatform := "POSTGRES" }}
+{{- $postgresDriver := "org.postgresql.Driver" }}
+
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-role
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-11") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "role") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "rolebinding") | nindent 4 }}
+rules:
+  - apiGroups: [ "" ]
+    resources:
+      - "pods/exec"
+      - "secrets"
+    resourceNames:
+      - "{{ .Values.rabbitmq.release.name }}-rabbitmq-0"
+      - "{{ .Values.solr.secretName }}"
+    verbs:
+      - "get"
+      - "create"
+      - "update"
+      - "patch"
+
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-rb
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-10") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "rolebinding") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "rolebinding") | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccountName }}
+    namespace: {{ include "namespaceValue" . }}
+roleRef:
+  kind: Role
+  name: {{ .Release.Name }}-pipeline-config-role
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-8") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" (dict "Values" .Values) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "bootstrapInstallHookSpecs" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $dasDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+
+        resources:
+          {{ .Values.resources.pipelineConfigJob | toYaml | indent 10 | trim }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-pipeline-config-job-config
+        env:
+          - name: EXSTREAM_PIPELINE_CONFIG
+            value: "true"
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 10 }}
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                key: defaultKey
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret{{ include "preInstallHookNameSuffix" . }}
+                key: keys
+          - name: RABBITMQ_RELEASE_NAME
+            value: {{ .Values.rabbitmq.release.name }}
+          - name: RABBITMQ_RELEASE_NAMESPACE
+            value: {{ .Values.rabbitmq.release.namespace }}
+          - name: SOLR_RELEASE_NAME
+            value: {{ .Values.solr.release.name }}
+          - name: SOLR_RELEASE_NAMESPACE
+            value: {{ .Values.solr.release.namespace }}
+          - name: SOLR_SECRET_NAME
+            value: {{ .Values.solr.secretName }}
+          - name: SOLR_DEFAULT_USERNAME
+            value: {{ .Values.solr.defaultUsername }}
+          - name: SOLR_DEFAULT_PASSWORD
+            value: {{ .Values.solr.defaultPassword }}
+          - name: SOLR_SERVICE_PROTOCOL
+            value: {{ .Values.solr.protocol }}
+
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-{{ .Chart.Name }}-job-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-9") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+  SPRING_DATASOURCE_URL: "{{ include "postgresJdbcUrl" (dict "Values" .Values "url" .Values.global.dasdb.externalDb.url) }}"
+  SPRING_PROFILES_ACTIVE: noauth,k8s,postgres
+
+  {{- include "getHikariConfiguration" . | nindent 2 }}
+  {{- include "databaseConfigMapOptions" .Values.global.dasdb | nindent 2 }}
+
+{{- end }}
+{{- end }}

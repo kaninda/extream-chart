@@ -1,0 +1,338 @@
+{
+    "name": "{{excs.appName}}",
+    "displayName": "{{excs.appDisplayName}}",
+    "description": "Communication design and generation",
+    "version": "{{excs.appVersion}}",
+    "cfApplication": false,
+    "singleTenantApplication": false,
+    "baseUrl": "{{excs.url}}",
+    "helpCode": "cccc-h-are",
+    "helpVersion": "250100",
+    "applicationPrefix": "exscs",
+    "availableForSubscription": true,
+    "platformDependencies": [],
+    "applicationRoles": [
+      {
+        "roleName": "tenant_admin",
+        "roleDescription": "Exstream tenant admin",
+        "defaultRole": false
+      },
+      {
+        "roleName": "empower_administrator",
+        "roleDescription": "Empower admin",
+        "defaultRole": false
+      },
+      {
+        "roleName": "empower_editor",
+        "roleDescription": "Empower editor",
+        "defaultRole": false
+      },
+      {
+        "roleName": "empower_integrator",
+        "roleDescription": "Empower integrator",
+        "defaultRole": false
+      },
+      {
+        "roleName": "exstream_user",
+        "roleDescription": "Exstream user",
+        "defaultRole": true
+      }
+    ],
+    "applicationSkus": [
+      {
+        "skuName": "Core4SFSF-Base",
+        "skuDescription": "",
+         
+        "applicationSkuParameters": [
+          {
+            "paramName": "exsBCA",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsCD",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsFmts",
+            "paramValue": "PDF",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsMPW",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsMsgs",
+            "paramValue": 0,
+            "paramType": "INTEGER"
+          },
+          {
+            "paramName": "exsOrcOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsPkg",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsTrans",
+            "paramValue": 1000000,
+            "paramType": "INTEGER"
+          },
+		  {
+            "paramName": "exsIntOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+		  },
+		  {
+            "paramName": "exsWMark",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+		  }
+        ]
+      },
+      {
+        "skuName": "Production",
+        "skuDescription": "",
+        "resetMetricsFrequency": "YEARLY",
+
+        "applicationSkuParameters": [
+          {
+            "paramName": "exsBCA",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsCD",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsFmts",
+            "paramValue": "AFP,DOCX,EMAIL,HTML,PDF,PDFA,PS",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsMPW",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsMsgs",
+            "paramValue": 0,
+            "paramType": "INTEGER"
+          },
+          {
+            "paramName": "exsOrcOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsPkg",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsTrans",
+            "paramValue": 50000,
+            "paramType": "INTEGER"
+          },
+		  {
+            "paramName": "exsIntOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+		  },
+		  {
+            "paramName": "exsWMark",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+		  }
+        ]
+      },
+      {
+        "skuName": "Development",
+        "skuDescription": "",
+        "resetMetricsFrequency": "YEARLY",
+         
+        "applicationSkuParameters": [
+          {
+            "paramName": "exsBCA",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsCD",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsFmts",
+            "paramValue": "AFP,DOCX,EMAIL,HTML,PDF,PDFA,PS",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsMPW",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsMsgs",
+            "paramValue": 0,
+            "paramType": "INTEGER"
+          },
+          {
+            "paramName": "exsOrcOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsPkg",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsTrans",
+            "paramValue": 10000,
+            "paramType": "INTEGER"
+          },
+		  {
+            "paramName": "exsIntOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+		  },
+		  {
+            "paramName": "exsWMark",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+		  }
+        ]
+      },
+      {
+        "skuName": "Trial",
+        "skuDescription": "",
+         
+        "applicationSkuParameters": [
+          {
+            "paramName": "exsBCA",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsCD",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsFmts",
+            "paramValue": "AFP,DOCX,EMAIL,HTML,PDF,PDFA,PS",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsMPW",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsMsgs",
+            "paramValue": 0,
+            "paramType": "INTEGER"
+          },
+          {
+            "paramName": "exsOrcOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+          },
+          {
+            "paramName": "exsPkg",
+            "paramValue": false,
+            "paramType": "BOOLEAN"
+          },
+          {
+            "paramName": "exsTrans",
+            "paramValue": 1000,
+            "paramType": "INTEGER"
+          },
+		  {
+            "paramName": "exsIntOpts",
+            "paramValue": "Base",
+            "paramType": "STRING"
+		  },
+		  {
+            "paramName": "exsWMark",
+            "paramValue": true,
+            "paramType": "BOOLEAN"
+		  }
+        ]
+      }
+    ],
+    "applicationParameters": [
+      {
+        "category": "SKU",
+        "name": "exsBCA",
+        "label": "Exstream Content Author Enabled",
+        "type": "BOOLEAN"
+      },
+      {
+        "category": "SKU",
+        "name": "exsCD",
+        "label": "Exstream Communications Designer Enabled",
+        "type": "BOOLEAN"
+      },
+      {
+        "category": "SKU",
+        "name": "exsFmts",
+        "label": "Exstream Output Formats",
+        "type": "STRING"
+      },
+      {
+        "category": "SKU",
+        "name": "exsMPW",
+        "label": "Exstream Empower Enabled",
+        "type": "BOOLEAN"
+      },
+      {
+        "category": "SKU",
+        "name": "exsMsgs",
+        "label": "Exstream Messages Count",
+        "type": "INTEGER"
+      },
+      {
+        "category": "SKU",
+        "name": "exsOrcOpts",
+        "label": "Exstream Orchestration Options",
+        "type": "STRING"
+      },
+      {
+        "category": "SKU",
+        "name": "exsPkg",
+        "label": "Exstream Packages Enabled",
+        "type": "BOOLEAN"
+      },
+      {
+        "category": "SKU",
+        "name": "exsTrans",
+        "label": "Exstream Transaction Count",
+        "type": "INTEGER",
+        "counterResettable": true,
+        "notifiable": true,
+        "viewableByAll": true
+      },
+	  {
+        "category": "SKU",
+        "name": "exsIntOpts",
+        "label": "Exstream Integration Options",
+        "type": "STRING"
+	  },
+	  {
+        "category": "SKU",
+        "name": "exsWMark",
+        "label": "Exstream Watermark",
+        "type": "BOOLEAN"
+	  }
+    ]
+}

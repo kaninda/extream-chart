@@ -1,0 +1,8 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.global.eidb.schema.autoManage.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "ei-config-api-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}
+{{- end }}

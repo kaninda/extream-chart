@@ -1,0 +1,140 @@
+{{- if .Values.global.orchestration.enabled -}}
+{{- $orcDockerImage := include "getOrcDockerImage" . -}}
+{{- $schedule := default "*/60 * * * *" .Values.schedule.cleanup -}}
+{{- $containerName := "orchestration-cache" -}}
+{{- $podName := "cleanupCron" -}}
+
+{{- if include "hasCapability" (dict "dot" . "capability" "batch/v1/CronJob") }}
+apiVersion: batch/v1
+{{ else }}
+apiVersion: batch/v1beta1
+{{ end }}
+kind: CronJob
+metadata:
+  name: {{.Release.Name}}-orchestration-janitor-cron
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "cronJob") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "cronJob") | nindent 4 }}
+spec:
+  schedule: {{ $schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+          namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+
+          annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 12 }}
+          labels:
+{{ include "getJavaVersionLabels" . | nindent 12 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 12 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+            azure.workload.identity/use: 'true'
+{{- end }}
+        spec:  
+          {{ include "getNodeSelector" .Values | nindent 10 }}
+          {{ include "getServiceAccount" .Values | nindent 10 }}
+          {{- include "imagePullSecrets" . | nindent 10 }}
+          securityContext:
+            {{- include "sharedStorageRunAsIds" . | nindent 12 }}
+          volumes:
+            {{- include "trustStoreVolume" . | nindent 12 }}
+            {{- include "extraSecretVolume" . | nindent 12 }}
+            {{- include "tempVolume" . | nindent 12 }}
+            {{- include "rabbitmqSecretVolume" . | nindent 12 }}
+            {{ if eq .Values.global.storage.shared.type "nfs"}}                  
+            - name: nfs-volume
+            {{ if .Values.global.storage.shared.local.enabled }}
+              hostPath:
+                path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+            {{ else }}
+              persistentVolumeClaim:
+                claimName: {{ .Release.Name }}-shared-storage-pvc
+            {{ end }}  
+            {{ end }}  
+          initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+          containers:                
+          - name: {{ $containerName }}
+            image: {{ $orcDockerImage }}
+            {{- include "imagePullPolicy" . | nindent 12 }}
+            securityContext:
+              {{- include "getReadOnlyRootFilesystemProperty" . | nindent 14 }}
+              {{- include "getDefaultSecurityContextProperties" . | nindent 14 }}
+            resources:
+              {{ .Values.resources.cleanupCron | toYaml | indent 14 | trim }}
+            envFrom:
+            - configMapRef:
+                name: {{ .Release.Name }}-orchestration-config
+            env:
+              {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName "endpoints" (printf "%s/version" (include "ORCH_URL_ROOT_BACKEND" .) )) | nindent 14 }}
+              {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 14 }}
+              {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 14 }}
+  {{- if .Values.global.readOnlyRootFilesystem }}
+              - name: READ_ONLY_FILESYSTEM
+                value: "true"
+  {{- end }}              
+              {{- include "getS3Properties" . | nindent 14 }}
+              - name: ENCRYPTION_DEFAULTKEY
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-keys-secret
+                    key: defaultKey
+              - name: ENCRYPTION_KEYS
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-keys-secret
+                    key: keys
+              {{- include "trustStorePassword" . | nindent 14 }}
+              {{- include "extraEnvironmentVars" .Values | nindent 14 }}
+              {{- include "rabbitSecrets" . | nindent 14 }}
+{{- if include "needDatabaseSecret" . }}
+              - name: SPRING_DATASOURCE_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-orcdb-secret
+                    key: system-schema-username
+              - name: SPRING_DATASOURCE_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-orcdb-secret
+                    key: system-schema-password
+{{- if .Values.global.orcdb.schema.autoManage.enabled }}
+              - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-orcdb-secret
+                    key: schema-management-username
+              - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Release.Name }}-orcdb-secret
+                    key: schema-management-password
+{{- end }}             
+{{- end }}
+              {{- include "oauthEnvSecrets" . | nindent 14 }}
+              {{- include "getVaultEnvVarsInEnvVars" (dict "Values" .Values "Release" .Release) | nindent 14 }}
+              - name: EXSTREAM_CLEAN_UP
+                value: "true"
+              {{- include "getAzureKeyVaultProperties" . | nindent 14 }}
+            volumeMounts:
+            {{- if eq .Values.global.storage.shared.type "nfs"}}
+            - mountPath: "/mnt/nfs"
+              name: nfs-volume
+            {{- end }}  
+            {{- include "trustStoreVolumeMount" . | nindent 12 }}
+            {{- include "extraSecretVolumeMount" . | nindent 12 }}
+            {{- include "tempVolumeMount" . | nindent 12 }}
+            {{- include "rabbitmqSecretVolumeMount" . | nindent 12 }}
+          {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 10 }}
+          restartPolicy: Never
+{{- end }}

@@ -1,0 +1,148 @@
+
+{{- if .Values.global.ot2.enabled -}}
+# By default, run the ot2 bootstrap. Disable it if global.ot2.bootstrap.enabled is specified and is false
+{{ if or (not ((((.Values).global).ot2).bootstrap)) ((((.Values).global).ot2).bootstrap).enabled }}
+
+
+{{- include "beginPreHookAsset" . -}}
+
+{{- $dockerImage := include "getOT2UtilsDockerImage" . -}}
+{{- $etsAppName := regexReplaceAll "^([^,]*).*$" (include "getOT2Applications" .) "${1}" -}}
+{{- $etsAppDisplayName := ternary "Core Communications" $etsAppName (eq $etsAppName "ExstreamCS") -}}
+{{- $containerName := "bootstrapot2" -}}
+{{- $podName := "bootstrapJob" -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-bootstrap-ot2-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-2") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "bootstrapInstallHookSpecs" . | nindent 6 }}
+
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $dockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        resources:
+          {{ .Values.resources.bootstrapJob | toYaml | indent 10 | trim }}
+        command: ['sh', '-c', 'cd /home/exstream; cp /bootstrapot2/exstreamcs_bootstrap.sh .; chmod 500 ./exstreamcs_bootstrap.sh; exec ./scripts/common/init/start.sh /home/exstream/exstreamcs_bootstrap.sh']
+        envFrom: 
+          - configMapRef:
+              name: {{ .Release.Name }}-bootstrap-ot2-config
+        env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 10 }}
+          - name: ETS_URL
+            value: {{ include "ETS_URL_ROOT_BACKEND" . | quote }}
+          - name: OTDS_URL
+            value: {{ include "OTDS_URL_ROOT_BACKEND" . | quote }}
+          - name: ETS_APP_NAME
+            value: {{ $etsAppName | quote }}
+          - name: ETS_APP_DISPLAY_NAME
+            value: {{ $etsAppDisplayName | quote }}
+          - name: ETS_APP_VERSION
+            value: {{ regexReplaceAll "^([0-9a-zA-Z]*\\.[0-9a-zA-Z]*\\.[0-9a-zA-Z]*).*$" .Chart.Version "${1}" | quote }}
+          - name: EXSTREAM_URL_FRONTEND_DAS_URL
+            value: "{{ include "getDasFrontEndUrlWithTrailingSlash" . }}"
+{{- if include "needOauthSecret" . }}
+          - name: OTDS_OAUTH2_CLIENTID
+            value: {{ required ".Values.global.otds.oauth2.clientId" ((((.Values).global).otds).oauth2).clientId | quote }}
+          - name: OTDS_OAUTH2_CLIENT_SECRET
+            value: {{ required ".Values.global.otds.oauth2.clientSecret" ((((.Values).global).otds).oauth2).clientSecret | quote }}
+{{- end }}
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+        volumeMounts:
+          - mountPath: /bootstrapot2
+            name: bootstrap-ot2-volume
+            readOnly: true
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+
+      volumes:
+        - name: bootstrap-ot2-volume
+          configMap:
+            name: {{.Release.Name}}-bootstrap-ot2-job-config
+            items:
+              - key: exstreamcs.json
+                path: exstreamcs.json
+              - key: exstreamcs_bootstrap.sh
+                path: exstreamcs_bootstrap.sh
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+
+--- 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{.Release.Name}}-bootstrap-ot2-job-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-3") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+binaryData:
+  exstreamcs.json: |-
+{{- if ((((((.Values).global).ot2).utils).ets).enrollment).json -}}
+  {{ .Values.global.ot2.utils.ets.enrollment.json | b64enc | nindent 4 }}
+{{- else }}
+  {{ .Files.Get "static/ExstreamCS.json" | b64enc | nindent 4 }}
+{{- end }}
+  exstreamcs_bootstrap.sh: |-
+  {{ .Files.Get "static/ExstreamCS_Bootstrap.sh" | b64enc | nindent 4 }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-bootstrap-ot2-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "preInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-3") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.heapFlags}}"
+{{- end }}
+
+{{- include "endPreHookAsset" . -}}
+
+{{- end }}
+{{- end }}

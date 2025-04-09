@@ -1,0 +1,140 @@
+{{- if .Values.global.design.enabled }}
+
+{{- $actualDasDockerImage := include "getDesignDockerImage" . -}}
+{{- $containerName := "design-upgrade" -}}
+{{- $podName := "upgradeJob" -}}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-design-upgrade-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    # Need to run post-install now, so that we can populate the SystemVersionInfo table.
+    {{ include "postInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-1") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{ include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      restartPolicy: Never
+      # Do not set a deadline for das object upgrades. In the presence of many tenants, this could took a while.
+      #activeDeadlineSeconds: 360
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $actualDasDockerImage  }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.upgradeJob | toYaml | indent 12 | trim }}
+          envFrom: 
+          - configMapRef:
+              name: {{ .Release.Name }}-design-config
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+{{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: system-schema-password
+{{- if .Values.global.dasdb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: schema-management-password
+{{- end }}
+{{- end }}
+{{- if .Values.solr }}
+{{- if .Values.solr.zkHosts }}
+            {{- include "rabbitSecrets" . | nindent 12 }}
+{{- if include "needSolrSecret" . }}
+            - name: EXSTREAM_SOLR_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-solr-secret
+                  key: solr-username
+            - name: EXSTREAM_SOLR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-solr-secret
+                  key: solr-password
+{{- end }}
+            - name: EXSTREAM_SOLR_ZKHOSTS
+              value: {{.Values.solr.zkHosts}}
+{{- end }}
+{{- end }}
+            - name: EXSTREAM_UPDATER
+              value: "true"
+            - name: SPRING_MAIN_WEBAPPLICATIONTYPE
+              value: "none"
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+          volumeMounts:
+            {{- include "trustStoreVolumeMount" . | nindent 12 }}
+            {{- include "extraSecretVolumeMount" . | nindent 12 }}
+            {{- include "rabbitmqSecretVolumeMount" . | nindent 12 }}
+            {{- include "tempVolumeMount" . | nindent 12 }}
+
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "rabbitmqSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+        
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end }}
+
+
+

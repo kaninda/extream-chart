@@ -1,0 +1,35 @@
+{{- if (.Values.global.rationalization).enabled }}
+{{- if .Values.global.istio.virtualService.enabled }}
+{{- $pathPrefix := include "getFrontEndUrlContextWithTrailingSlash" . }}
+
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "virtualService") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "virtualService") | nindent 4 }}
+spec:
+  gateways:
+    {{ include "getVirtualServiceGateways" . }}
+  hosts:
+    - {{ .Values.global.ingress.hostname }}
+{{- range $extraHost := .Values.global.istio.virtualService.extraHosts }}
+    - {{ $extraHost }}
+{{- end }}
+    - {{ .Release.Name }}-rationalization-api-service
+  http:
+    - match:
+      - uri:
+          prefix: /{{ $pathPrefix }}rationalizationApi
+      name: rationalization-service
+      route:
+      - destination:
+          host: {{ .Release.Name }}-rationalization-api-service
+          port:
+            number: {{ .Values.api.port }}
+
+{{- end }}
+{{- end }}

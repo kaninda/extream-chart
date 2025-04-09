@@ -1,0 +1,159 @@
+{{- if .Values.enabled }}
+
+{{- $actualDockerImage := include "getOT2UtilsDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "migrator") -}}  
+{{- $podName := "migrator" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-migrator")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/migrator-config-main.yaml") . | sha256sum }}
+        checksum/migratordb-secret: {{ include (print $.Template.BasePath "/migratordb-secret-main.yaml") . | sha256sum }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        #Cannot include keys-secret, because it uses non-global values
+        #checksum/keys-secret: include (print "exstream/templates/encryption-secret-main.yaml") . | sha256sum
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $actualDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          command: ['/bin/bash', '-c', '/home/exstream/scripts/common/init/start.sh /home/exstream/migrator/scripts/init/start.sh']
+          securityContext:
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.migrator | toYaml | indent 12 | trim }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-migrator-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+          {{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-migratordb-secret
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-migratordb-secret
+                  key: system-schema-password
+{{- if .Values.db.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-migratordb-secret
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-migratordb-secret
+                  key: schema-management-password
+{{- end }}
+          {{- end -}}
+            {{- include "oauthEnvSecrets" . | nindent 12 }}
+            {{- include "rabbitSecrets" . | nindent 12 }}
+{{ if .Values.global.prometheus }}
+            - name: PROMETHEUS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.prometheus.secretName }}
+                  key: {{ .Values.global.prometheus.secretKey }}
+{{ end }}
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "newRelicPodVariables" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+
+          volumeMounts:
+            {{ if eq .Values.global.storage.shared.type "nfs" }}
+            - mountPath: "/mnt/nfs"
+              name: nfs-volume
+            {{ end }}
+            {{- include "trustStoreVolumeMount" . | nindent 12 }}
+            {{- include "extraSecretVolumeMount" . | nindent 12 }}
+            {{- include "rabbitmqSecretVolumeMount" . | nindent 12 }}
+
+          # hostPort: 80
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/migrator/version
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+{{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/migrator/version
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+{{- end }}
+
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+{{- include "trustStoreVolume" . | nindent 8 }}
+{{- include "extraSecretVolume" . | nindent 8 }}
+{{- include "rabbitmqSecretVolume" . | nindent 8 }}
+{{ if eq .Values.global.storage.shared.type "nfs" }}
+        - name: nfs-volume
+{{ if .Values.global.storage.shared.local.enabled }}
+          hostPath:
+            path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+{{ else }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-shared-storage-pvc
+{{ end }}
+{{ end }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end}}

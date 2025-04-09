@@ -1,0 +1,341 @@
+{{- if .Values.global.rationalization }}
+{{- if .Values.global.rationalization.enabled }}
+
+{{- $apiDockerImage := include "getRatApiDockerImage" . -}}
+{{- $jobDockerImage := include "getRatJobDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValueApi := printf "%s-%s-api" .Release.Name .Chart.Name -}}
+{{- $appLabelValueJobs := printf "%s-%s-jobs" .Release.Name .Chart.Name -}}
+{{- $apiContainerName := include "getContainerName" (dict "dot" . "path" "api.deployment.container.name" "defaultValue" "rationalization-api") -}}  
+{{- $apiPodName := "rationalizationApi" -}}
+{{- $jobContainerName := include "getContainerName" (dict "dot" . "path" "job.deployment.container.name" "defaultValue" "rationalization-jobs") -}} 
+{{- $jobsPodName := "rationalizationJobs" -}}
+
+---
+#rationalization-api
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "api.deployment.name" "defaultValue" (print .Release.Name "-rationalization-api")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValueApi }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValueApi }}
+{{ include "getJavaVersionLabels" (dict "Values" .Values.api) | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/rationalization-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/rationalizationdb-secret: {{ include (print $.Template.BasePath "/rationalizationdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "sharedStorageRunAsIds" . | nindent 8 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValueApi) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $apiContainerName }}
+          image: {{ $apiDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.rationalizationApi | toYaml | indent 12 | trim }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-rationalization-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $apiPodName) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $apiPodName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $apiContainerName) | nindent 10 }}
+          - name: KUBERNETES_NAMESPACE
+            value: {{ include "namespaceValue" . }}
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: defaultKey
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: keys
+{{- if include "needDatabaseSecret" . }}
+          - name: SPRING_DATASOURCE_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: system-schema-username
+          - name: SPRING_DATASOURCE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: system-schema-password
+{{- if .Values.global.rationalizationdb.schema.autoManage.enabled }}
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: schema-management-username
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: schema-management-password
+{{- end }}
+{{- end }}
+          {{- include "rabbitSecrets" . | nindent 10 }}
+          {{- include "oauthEnvSecrets" . | nindent 10 }}
+          - name: EXSTREAM_RAT_MODULE
+            value: "rationalization-api"
+          {{ if .Values.global.prometheus }}
+          - name: PROMETHEUS_SECRET
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.global.prometheus.secretName }}
+                key: {{ .Values.global.prometheus.secretKey }}
+          {{ end }}
+          {{ if .Values.solr }}
+          {{- if .Values.solr.zkHosts }}
+          {{- if include "needSolrSecret" . }}
+          - name: EXSTREAM_SOLR_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-solr-secret
+                key: solr-username
+          - name: EXSTREAM_SOLR_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-solr-secret
+                key: solr-password
+          {{ end }}
+          - name: EXSTREAM_SOLR_ZKHOSTS
+            value: {{.Values.solr.zkHosts}}
+          {{ end }}
+          {{ end }}
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "newRelicPodVariables" . | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          volumeMounts:
+          {{ if eq .Values.global.storage.shared.type "nfs" }}
+          - name: nfs-volume
+            mountPath: "/mnt/nfs"
+          {{ end }}
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 10 }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/rationalizationApi/actuator/health
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+          {{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/rationalizationApi/actuator/health
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+          {{- end }}
+        {{- include "extraContainers" (dict "dot" . "pod" $apiPodName) | nindent 8 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 6 }}
+      {{- include "tempVolume" . | nindent 6 }}
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+      {{- include "extraSecretVolume" . | nindent 6 }}
+      {{- include "rabbitmqSecretVolume" . | nindent 6 }}
+      {{- if eq .Values.global.storage.shared.type "nfs" }}
+      - name: nfs-volume
+      {{- if .Values.global.storage.shared.local.enabled }}
+        hostPath:
+          path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+      {{- else }}
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-shared-storage-pvc
+      {{- end }}
+      {{- end }}
+---
+
+#rationalization-jobs
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "job.deployment.name" "defaultValue" (print .Release.Name "-rationalization-jobs")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValueJobs }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValueJobs }}
+{{ include "getJavaVersionLabels" (dict "Values" .Values.job) | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/rationalization-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/rationalizationdb-secret: {{ include (print $.Template.BasePath "/rationalizationdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValueJobs) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $jobContainerName }}
+          image: {{ $jobDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.rationalizationJobs | toYaml | indent 12 | trim }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-rationalization-config
+          env:
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $jobsPodName "endpoints" (printf "%s/version" (include "RATIONALIZATION_URL_ROOT_BACKEND" .) )) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $jobsPodName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $jobContainerName) | nindent 10 }}
+          - name: KUBERNETES_NAMESPACE
+            value: {{ include "namespaceValue" . }}
+          - name: ENCRYPTION_DEFAULTKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: defaultKey
+          - name: ENCRYPTION_KEYS
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-keys-secret
+                key: keys
+{{- if include "needDatabaseSecret" . }}
+          - name: SPRING_DATASOURCE_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: system-schema-username
+          - name: SPRING_DATASOURCE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: system-schema-password
+{{- if .Values.global.rationalizationdb.schema.autoManage.enabled }}
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: schema-management-username
+          - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Release.Name }}-rationalizationdb-secret
+                key: schema-management-password
+{{- end }}
+{{- end }}
+          {{- include "rabbitSecrets" . | nindent 10 }}
+          {{- include "oauthEnvSecrets" . | nindent 10 }}
+          {{- include "oauthEnvSecretsCustomNames" (dict "dot" . "idName" "EXSTREAM_RAT_OTDS_CLIENTID" "secretName" "EXSTREAM_RAT_OTDS_CLIENTSECRET" ) | nindent 10 }}
+
+          - name: EXSTREAM_RAT_MODULE
+            value: "rationalization-jobs"
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          volumeMounts:
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 10 }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+          readinessProbe:
+            exec:
+              command: ['/home/exstream/scripts/check-rat.sh', '300']
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 2
+            timeoutSeconds: 2
+          {{- if not .Values.debugger }}
+          livenessProbe:
+            exec:
+              command: ['/home/exstream/scripts/check-rat.sh', '300']
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            failureThreshold: 10
+            timeoutSeconds: 2
+          {{- end }}
+        {{- include "extraContainers" (dict "dot" . "pod" $jobsPodName) | nindent 8 }}
+      volumes:
+      {{- include "trustStoreVolume" . | nindent 6 }}
+      {{- include "extraSecretVolume" . | nindent 6 }}
+      {{- include "tempVolume" . | nindent 6 }}
+      {{- include "rabbitmqSecretVolume" . | nindent 6 }}
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+---
+{{- end}}
+{{- end}}

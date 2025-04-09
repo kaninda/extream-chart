@@ -1,0 +1,140 @@
+# Umbrella chart's parent values will override subchart's values 
+# Since the sub chart is considered standalone , it cannot access parent chart values
+metrics: false
+deployment: 
+  containerPort: 8300
+#  # optionally specify deployment and container names.
+#  container:
+#    name:
+#  name:
+ingress: 
+  pathName: orchestration
+svc: 
+  port: 8300
+  targetPort: 8300
+
+debugger: false
+local: false
+gracefulTerminationTimeout: 28800
+allowedOrigins:
+contentSecurityPolicy:
+
+# Optional custom settings for heap management.
+# For example:
+# "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=10000 -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=10 -XX:MaxRAMPercentage=80 -Xlog:gc=info"
+heapFlags:
+
+heapSettings:
+
+# Configures the strategy Deployments use to replace old Pods with new ones. Can 
+# be set to RollingUpdate or Recreate. 
+# 
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+updateStrategy: RollingUpdate
+
+# Optional values that can be set when using a RollingUpdate strategy for Deployments.
+# Can be an absolute number or a percentage of desired Pods.
+#
+# Note: maxUnavailable and maxSurge cannot both be set to 0
+#
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-unavailable
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-surge
+# rollingUpdate:
+#   maxUnavailable: 25%
+#   maxSurge: 25%
+
+versions:
+  jdkVersion: "17.0.13"
+  springBootVersion: "3.3.9"
+
+replicaCount: 1
+
+trust:
+  check:
+    identity: true
+    trust: true
+
+secrets:
+  crossdomains: false
+  
+schedule:
+  cleanup: "*/60 * * * *" #expects a cron like */60 * * * *    
+  sysCronJob:
+    init: false
+    overwrite: true
+    markDeleted:
+      enabled: true
+      name: sys_markJobsForDeletion
+      cronExpression: "0 23 * * SAT"
+      timeSinceEndOfJob: 30
+    cancel:
+      enabled: true
+      name: sys_cancelJobs
+      cronExpression: "0 20 * * SAT"
+      timeSinceStartOfJob: 14      
+    wipe:
+      enabled: true
+      name: sys_wipeJobs
+      cronExpression: "0 23 * * SUN" 
+    wipeSortingAssets:
+      enabled: true
+      name: sys_wipeSortingAssets
+      cronExpression: "0 22 * * SUN" 
+      timeSinceCreated: 30
+    expireSortingAssets:
+      enabled: false
+      name: sys_expireSortingAssets
+      cronExpression: "0 22 * * SAT" 
+      timeSinceCreated: 14
+
+livenessProbe:
+  default:
+    failureThreshold: 10
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 5
+
+readinessProbe:
+  default:
+    failureThreshold: 10
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+# Helm recommends not specifying default resources and to leave this as a
+# conscious choice for the user.
+resources:
+  orchestration: {}
+    # requests:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: ""
+    # limits:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: ""
+  schema: {}
+    # requests:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: ""
+    # limits:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: "2Gi"
+  cleanupCron: {}
+    # requests:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: ""
+    # limits:
+    #   cpu: ""
+    #   memory: ""
+    #   ephemeral-storage: ""
+    
+storage:
+  s3:
+    testEnabled: false
+  tempVolume: {}
+    # sizeLimit: "5Gi"    

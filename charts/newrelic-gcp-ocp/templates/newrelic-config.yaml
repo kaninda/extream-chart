@@ -1,0 +1,29 @@
+{{- if include "isGcpOcpNewRelic" . }}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  NEW_RELIC_LOG: "stdout"
+  NEW_RELIC_LOG_FILE_NAME: "STDOUT"
+{{ if .Values.global.newrelic.log }}
+  NEW_RELIC_LOG_LEVEL: {{ .Values.global.newrelic.log.level | quote }}
+{{ end }}
+{{ if .Values.global.newrelic.proxy }}
+  {{ if and (not .Values.global.newrelic.proxy.usernameSecretKey) (not .Values.global.newrelic.proxy.passwordSecretKey) }}
+  NEW_RELIC_PROXY_URL: {{ printf "%s://%s:%v/" (default "http" .Values.global.newrelic.proxy.scheme) .Values.global.newrelic.proxy.host .Values.global.newrelic.proxy.port | quote }}
+  {{ end }}
+  NEW_RELIC_PROXY_SCHEME: {{ default "http" .Values.global.newrelic.proxy.scheme | quote }}
+  NEW_RELIC_PROXY_HOST: {{ .Values.global.newrelic.proxy.host | quote }}
+  NEW_RELIC_PROXY_PORT: {{ .Values.global.newrelic.proxy.port | quote }}
+{{ end }}
+  NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
+  NEW_RELIC_SEND_DATA_ON_EXIT: "true"
+
+{{- end -}}

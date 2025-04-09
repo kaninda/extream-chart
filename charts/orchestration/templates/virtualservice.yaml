@@ -1,0 +1,35 @@
+{{- if .Values.global.orchestration.enabled -}}
+{{- if .Values.global.istio.virtualService.enabled }}
+{{- $pathPrefix := include "getFrontEndUrlContextWithTrailingSlash" . }}
+
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: {{ .Release.Name }}-{{ .Chart.Name }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "virtualService") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "virtualService") | nindent 4 }}
+spec:
+  gateways:
+    {{ include "getVirtualServiceGateways" . }}
+  hosts:
+    - {{ .Values.global.ingress.hostname }}
+{{- range $extraHost := .Values.global.istio.virtualService.extraHosts }}
+    - {{ $extraHost }}
+{{- end }}
+    - {{ .Release.Name }}-orchestration-service
+  http:
+    - match:
+      - uri:
+          prefix: /{{ $pathPrefix }}orchestration
+      name: orchestration-service
+      route:
+      - destination:
+          host: {{ .Release.Name }}-orchestration-service
+          port:
+            number: {{ .Values.svc.port }}
+
+{{- end }}
+{{- end }}

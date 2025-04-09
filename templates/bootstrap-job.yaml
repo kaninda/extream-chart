@@ -1,0 +1,199 @@
+
+{{- if .Values.bootstrap -}}
+{{- if .Values.bootstrap.config -}}
+
+{{- $dot := dict "Values" .Values.bootstrap "Chart" .Chart "Release" .Release "Template" .Template -}}
+{{- $_ := set $dot.Values "global" .Values.global -}}
+{{- $_ := set $dot.Values "design" .Values.design -}}
+{{- $_ := set $dot.Values "otds" .Values.otds -}}
+
+{{- with $dot -}}
+
+{{- $dasDockerImage:= include "getDesignDockerImage" . -}}
+{{- $exstreamUrlFrontEndDasUrl := include "getDasFrontEndUrl" . }}
+{{- $exstreamUrlFrontEndEmpowerUrl := include "getEmpowerFrontEndUrl" . }}
+{{- $exstreamUrlFrontEndOndemandUrl := include "getOndemandFrontEndUrl" . }}
+{{- $containerName := "bootstrap" -}}
+{{- $podName := "bootstrapJob" -}}
+
+{{- $waitForEndpoints := list -}}
+{{- if .Values.global.design.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/version" (include "DAS_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+{{- if .Values.global.eep.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/version" (include "EEP_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+{{- if .Values.global.ei.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/version" (include "EI_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+{{- if .Values.global.empower.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/actuator/health" (include "EMPOWER_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+{{- if .Values.global.orchestration.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/version" (include "ORCH_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+{{- if .Values.global.rationalization.enabled -}}
+{{- $waitForEndpoints = append $waitForEndpoints (printf "%s/version" (include "RATIONALIZATION_URL_ROOT_BACKEND" .)) -}}
+{{- end -}}
+
+{{- $waitForEndpoints = (join "," $waitForEndpoints ) -}}
+
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-bootstrap-job{{- include "getHookJobNameSuffix" . }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "postInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-1") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "job") | nindent 4 }}    
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "job") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+spec:
+{{ include "preInstallUpgradeSpecs" . | indent 2 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+{{ include "getJavaVersionLabels" (dict "Values" .Values) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values.design | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      {{- include "bootstrapInstallHookSpecs" . | nindent 6 }}
+      containers:
+      - name: {{ $containerName }}
+        image: {{ $dasDockerImage }}
+        {{- include "imagePullPolicy" . | nindent 8 }}
+        securityContext:
+          {{- include "getReadOnlyRootFilesystemProperty" . | nindent 10 }}
+          {{- include "getDefaultSecurityContextProperties" . | nindent 10 }}
+
+        resources:
+          {{ .Values.resources.bootstrapJob | toYaml | indent 10 | trim }}
+        envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-bootstrap-job-config
+        env:
+          - name: EXSTREAM_BOOTSTRAP
+            value: "true"
+          {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName "endpoints" $waitForEndpoints) | nindent 10 }}
+          {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 10 }}
+          {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 10 }}
+          - name: EXSTREAM_URL_FRONTEND_DAS_URL
+            value: "{{ $exstreamUrlFrontEndDasUrl }}"
+          - name: EXSTREAM_URL_FRONTEND_EMPOWER_URL
+            value: "{{ $exstreamUrlFrontEndEmpowerUrl }}"
+          - name: EXSTREAM_URL_FRONTEND_ONDEMAND_URL
+            value: "{{ $exstreamUrlFrontEndOndemandUrl }}"
+          - name: OTDS_URL_ROOT_BACKEND
+            value: {{ include "OTDS_URL_ROOT_BACKEND" . | quote }}
+          - name: DAS_URL_ROOT_BACKEND
+            value: {{ include "DAS_URL_ROOT_BACKEND" . | quote }}
+          - name: ORCH_URL_ROOT_BACKEND
+            value: {{ include "ORCH_URL_ROOT_BACKEND" . | quote }}
+          - name: EMPOWER_URL_ROOT_BACKEND
+            value: {{ include "EMPOWER_URL_ROOT_BACKEND" . | quote }}
+          - name: EI_URL_ROOT_BACKEND
+            value: {{ include "EI_URL_ROOT_BACKEND" . | quote }}
+          - name: EEP_URL_ROOT_BACKEND
+            value: {{ include "EEP_URL_ROOT_BACKEND" . | quote }}
+          - name: RATIONALIZATION_URL_ROOT_BACKEND
+            value: {{ include "RATIONALIZATION_URL_ROOT_BACKEND" . | quote }}
+          - name: EMPOWER_ENABLED
+            value: {{ required "global.empower.enabled is required" .Values.global.empower.enabled | quote }}
+          - name: ORCH_ENABLED
+            value: {{ required "global.orchestration.enabled is required" .Values.global.orchestration.enabled | quote }}
+          - name: EI_ENABLED
+            value: {{ required "global.ei.enabled is required" .Values.global.ei.enabled | quote }}
+          - name: EEP_ENABLED
+            value: {{ or .Values.global.assuredDelivery.enabled .Values.global.ei.enabled .Values.global.eep.enabled | quote }}
+          - name: RATIONALIZATION_ENABLED
+            value: {{ required "global.rationalization.enabled is required" .Values.global.rationalization.enabled | quote }}
+
+          {{- include "oauthEnvSecretsCustomNames" (dict "dot" . "idName" "OTDS_OAUTH_CLIENT_ID" "secretName" "OTDS_OAUTH_CLIENT_SECRET" ) | nindent 10 }}
+          {{- include "getVaultEnvVarsInEnvVars" (dict "Values" .Values.design "Release" .Release) | nindent 10 }}
+
+{{- if .Values.otds }}
+{{- if .Values.otds.bootstrap }}
+{{- if .Values.otds.bootstrap.license.enabled }}
+          - name: BOOTSTRAP_SAMPLE_LICENSE_NONPROD
+            value: {{  .Values.otds.bootstrap.license.nonprod | quote }}
+          - name: BOOTSTRAP_SAMPLE_LICENSE_PROD
+            value: {{  .Values.otds.bootstrap.license.prod | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+          {{- include "trustStorePassword" . | nindent 10 }}
+          {{- include "extraEnvironmentVars" .Values | nindent 10 }}
+          {{- include "getAzureKeyVaultProperties" . | nindent 10 }}
+        volumeMounts:
+          - mountPath: /bootstrap
+            name: bootstrap-volume
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+      {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 6 }}
+      volumes:
+        - name: bootstrap-volume
+          secret:
+            secretName: {{.Release.Name}}-bootstrap-job-secret
+
+        {{- include "trustStoreVolume" . | nindent 8 }}
+        {{- include "extraSecretVolume" . | nindent 8 }}
+        {{- include "tempVolume" . | nindent 8 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{.Release.Name}}-bootstrap-job-secret
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "postInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-2") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "secret") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "secret") | nindent 4 }}
+
+type: Opaque
+data:
+  bootstrap.yaml: |-
+    {{ toYaml .Values.config | b64enc | nindent 4 }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name:  {{ .Release.Name }}-bootstrap-job-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    {{ include "postInstallHookCustomAnnotations" (dict "dot" . "hookWeight" "-2") | nindent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  {{- include "configMapJavaLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+{{- if .Values.heapFlags }}
+  EXSTREAM_HEAP_FLAGS: "{{.Values.design.heapFlags}}"
+{{- end }}
+
+{{- end }}
+{{- end }}
+{{- end }}

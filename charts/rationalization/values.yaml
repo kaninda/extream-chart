@@ -1,0 +1,110 @@
+# Umbrella chart's parent values will override subchart's values 
+# Since the sub chart is considered standalone , it cannot access parent chart values
+metrics: false
+deployment: 
+  containerPort: 8051
+
+api:
+  port: 8051
+  targetPort: 8051
+  versions:
+    jdkVersion: "17.0.13"
+    springBootVersion: "3.3.3"
+
+ingress: 
+  apiPathName: rationalizationApi
+  uiPathName: rationalization
+local: false
+debugger: false
+allowedOrigins:
+contentSecurityPolicy:
+
+#api:
+#  deployment:
+#    # optionally specify deployment and container names.
+#    container:
+#      name:
+#    name:
+job:
+#  deployment:
+#    # optionally specify deployment and container names.
+#    container:
+#      name:
+#    name:
+  versions:
+    jdkVersion: "17.0.13"
+    springBootVersion: "3.3.3"    
+
+# Configures the strategy Deployments use to replace old Pods with new ones. Can 
+# be set to RollingUpdate or Recreate. 
+# 
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+updateStrategy: RollingUpdate
+
+# Optional values that can be set when using a RollingUpdate strategy for Deployments.
+# Can be an absolute number or a percentage of desired Pods.
+#
+# Note: maxUnavailable and maxSurge cannot both be set to 0
+#
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-unavailable
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-surge
+# rollingUpdate:
+#   maxUnavailable: 25%
+#   maxSurge: 25%
+
+replicaCount: 1 
+
+solr:
+  zkHosts: ""
+  username: ""
+  password: ""
+
+# Optional custom settings for heap management.
+# For example:
+# "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=10000 -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=10 -XX:MaxRAMPercentage=80 -Xlog:gc=info"
+heapFlags:
+
+livenessProbe:
+  default:
+    failureThreshold: 5
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+readinessProbe:
+  default:
+    failureThreshold: 2
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+# Helm recommends not specifying default resources and to leave this as a 
+# conscious choice for the user.
+resources:
+  rationalizationApi: {}
+    # requests:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    # limits:
+    #   cpu: "2000m"
+    #   memory: "4Gi"
+  schema: {}
+    # requests:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    # limits:
+    #   cpu: "2000m"
+    #   memory: "4Gi"
+  rationalizationJobs: {}
+    # requests:
+    #   cpu: "500m"
+    #   memory: "1Gi"
+    # limits:
+    #   cpu: "1000m"
+    #   memory: "2Gi"
+    
+storage:
+  tempVolume: {} 
+   

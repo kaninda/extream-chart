@@ -1,0 +1,23 @@
+{{- if and (.Values.global.storage.shared.pvc.enabled) (not .Values.global.storage.shared.local.enabled) (or .Values.global.ondemand.enabled .Values.global.batch.enabled .Values.global.orchestration.enabled) -}}
+{{- if eq .Values.global.storage.shared.type "nfs"}}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ .Release.Name }}-shared-storage-pvc
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+    "helm.sh/resource-policy": keep
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "persistentVolumeClaim") | nindent 4 }}    
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "persistentVolumeClaim") | nindent 4 }}
+spec:
+  storageClassName: {{ required "global.storage.shared.className is required" .Values.global.storage.shared.className }}
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: {{ .Values.global.storage.shared.size | quote }}
+---
+{{- end }}
+{{- end }}

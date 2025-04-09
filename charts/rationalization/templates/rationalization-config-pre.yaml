@@ -1,0 +1,8 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.global.rationalizationdb.schema.autoManage.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "rationalization-config-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}
+{{- end }}

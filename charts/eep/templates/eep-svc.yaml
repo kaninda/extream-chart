@@ -1,0 +1,24 @@
+{{- if or .Values.global.assuredDelivery.enabled .Values.global.ei.enabled .Values.global.eep.enabled}}
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: {{.Release.Name}}-eep-service
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getServiceAnnotations" . | indent 4 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+spec:
+  type: {{ include "getServiceType" . }}
+  selector:
+    app: {{.Release.Name}}-eep
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 4 }}
+  ports:
+  - protocol: TCP
+    port: {{ .Values.eep.svc.port }} 
+    targetPort: {{ .Values.eep.svc.targetPort }} 
+    name: http
+    {{ include "getNodePortFix" . | indent 4 | trim }}
+{{- end}}

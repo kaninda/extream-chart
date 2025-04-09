@@ -1,0 +1,114 @@
+enabled: true
+deployment:
+  containerPort: 9090
+#  # optionally specify deployment and container names.
+#  container:
+#    name:
+#  name:
+svc:
+  port: 9090
+  targetPort: 9090
+
+ingress:
+  pathName: empower
+
+allowedOrigins:
+# Optional custom settings for heap management.
+# For example:
+# "-XX:+UseG1GC -XX:+UseStringDeduplication -XX:G1PeriodicGCInterval=10000 -XX:MinHeapFreeRatio=5 -XX:MaxHeapFreeRatio=10 -XX:MaxRAMPercentage=80 -Xlog:gc=info"
+heapFlags:
+
+# Configures the strategy Deployments use to replace old Pods with new ones. Can 
+# be set to RollingUpdate or Recreate. 
+# 
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy
+updateStrategy: RollingUpdate
+
+# Optional values that can be set when using a RollingUpdate strategy for Deployments.
+# Can be an absolute number or a percentage of desired Pods.
+#
+# Note: maxUnavailable and maxSurge cannot both be set to 0
+#
+# For more information see:
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-unavailable
+# https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#max-surge
+# rollingUpdate:
+#   maxUnavailable: 25%
+#   maxSurge: 25%
+
+versions:
+  jdkVersion: "17.0.13"
+  springBootVersion: "3.2.4"
+
+replicaCount: 1
+
+audit:
+  enabled: false
+
+hikari:
+  minIdle: 10
+  maxPool: 10
+  maxLifetime: 600000
+  idleTimeout: 300000
+  connTimeout: 30000
+
+spring:
+  zipkinEnabled: false
+  zipkinBaseUrl: http://zipkin:9411/
+  sleuthSamplerProbability: 0.0
+
+gcp:
+  ai:
+    # Enable Experience Aviator for use in Empower. Requires design.gcp.ai.enabled=true in order to work.
+    enabled: false
+
+metrics: false
+
+livenessProbe:
+  default:
+    failureThreshold: 10
+    initialDelaySeconds: 120
+    periodSeconds: 10
+    timeoutSeconds: 2
+
+readinessProbe:
+  default:
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    failureThreshold: 10
+
+# Helm recommends not specifying default resources and to leave this as a
+# conscious choice for the user.
+resources:
+  empower: {}
+    # requests:
+    #   cpu: "1000m"
+    #   memory: "4Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "2000m"
+    #   memory: "8Gi"
+    #   ephemeral-storage: "5Gi"
+  schema: {}
+    # requests:
+    #   cpu: "750m"
+    #   memory: "1.5Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1500m"
+    #   memory: "1.5Gi"
+    #   ephemeral-storage: "2Gi"
+  editorUploadJob: {}
+    # requests:
+    #   cpu: "750m"
+    #   memory: "1.5Gi"
+    #   ephemeral-storage: "1Gi"
+    # limits:
+    #   cpu: "1500m"
+    #   memory: "1.5Gi"
+    #   ephemeral-storage: "2Gi"
+
+storage:
+  tempVolume: {}
+    # sizeLimit: "5Gi"

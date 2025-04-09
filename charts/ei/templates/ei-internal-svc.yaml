@@ -1,0 +1,22 @@
+{{- if .Values.global.ei.enabled }}
+
+kind: Service
+apiVersion: v1
+metadata:
+  name: {{.Release.Name}}-ei-config-api-internal-service
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "service") | nindent 4 }}
+spec:
+  selector:
+    app: {{.Release.Name}}-ei-config-api
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 4 }}
+  ports:
+  - protocol: TCP
+    port: {{.Values.config.api.svc.internalport}}
+    targetPort: {{.Values.config.api.svc.internalport}}
+    name: http
+
+{{- end}}

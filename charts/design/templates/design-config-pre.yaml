@@ -1,0 +1,8 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.global.dasdb.schema.autoManage.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "design-config-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}
+{{- end }}

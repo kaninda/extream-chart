@@ -1,0 +1,240 @@
+{{- if .Values.global.design.enabled }}
+
+{{- $actualDasDockerImage := include "getDesignDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $terminationGracePeriodSeconds := div (add .Values.termination.server.delay.millis 2000 ) 1000 -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "design") -}}  
+{{- $podName := "design" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-design")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/design-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/dasdb-secret: {{ include (print $.Template.BasePath "/dasdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        #Cannot include keys-secret, because it uses non-global values
+        #checksum/keys-secret: include (print "exstream/templates/encryption-secret-main.yaml") . | sha256sum
+{{- if include "dig" (list "gcp" "ai" "enabled" false .Values) }}
+{{- if include "needGcpAiSecret" . }}
+        checksum/gcp-ai-credentials-secret: {{ include (print $.Template.BasePath "/gcp-ai-credentials-secret.yaml") . | sha256sum }}
+{{- end }}
+{{- end }}
+{{- if .Values.solr }}
+{{- if .Values.solr.zkHosts }}
+{{- if include "needSolrSecret" . }}
+        checksum/solr-secret: {{ include (print $.Template.BasePath "/solr-secret.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+{{- end }}
+{{- end }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+    spec:
+      {{ include "getNodeSelector" .Values | nindent 6 }}
+      {{ include "getServiceAccount" .Values | nindent 6 }}
+
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "runAsIds" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $terminationGracePeriodSeconds }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $actualDasDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.design | toYaml | indent 12 | trim }}
+          ports:
+            - containerPort: {{ .Values.deployment.containerPort }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-design-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+          {{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: system-schema-password
+{{- if .Values.global.dasdb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-dasdb-secret
+                  key: schema-management-password
+{{- end }}
+          {{- end -}}
+            {{- include "oauthEnvSecrets" . | nindent 12 }}
+          {{- if include "needOauthSecret" . }}
+{{ if and .Values.global.ot2.enabled ((((.Values.global.ot2).events).callback).oauth2).clientId }}
+            - name: EXSTREAM_OT2_EVENTS_CALLBACK_OAUTH2_CLIENTID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-otds-client-secret
+                  key: ot2_events_callback_clientId
+            - name: EXSTREAM_OT2_EVENTS_CALLBACK_OAUTH2_CLIENTSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-otds-client-secret
+                  key: ot2_events_callback_clientSecret
+{{ end }}
+          {{- end -}}
+            {{- include "rabbitSecrets" . | nindent 12 }}
+{{- if include "needSolrSecret" . }}
+{{- if include "dig" (list "solr" "zkHosts" "" .Values) }}
+            - name: EXSTREAM_SOLR_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-solr-secret
+                  key: solr-username
+            - name: EXSTREAM_SOLR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-solr-secret
+                  key: solr-password
+{{- end }}
+{{- end }}
+{{- if include "dig" (list "solr" "zkHosts" "" .Values) }}
+            - name: EXSTREAM_SOLR_ZKHOSTS
+              value: {{.Values.solr.zkHosts}}
+{{- end }}
+{{- if include "dig" (list "gcp" "ai" "enabled" false .Values) }}
+            - name: GCP_AI_ENABLED
+              value: {{ .Values.gcp.ai.enabled | quote }}
+            - name: GCP_AI_REGION
+              value: {{ required "design.gcp.ai.region is required when design.gcp.ai.enabled is true" .Values.gcp.ai.region }}
+{{- if include "dig" (list "gcp" "ai" "model" "" .Values) }}
+            - name: GCP_AI_MODEL
+              value: {{ .Values.gcp.ai.model }}
+{{- end }}
+{{- if include "needGcpAiSecret" . }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/opt/secret/gcp-ai-credentials/credentials"
+{{- end }}
+{{- end }}
+
+{{ if .Values.global.prometheus }}
+            - name: PROMETHEUS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.prometheus.secretName }}
+                  key: {{ .Values.global.prometheus.secretKey }}
+{{ end }}
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "newRelicPodVariables" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+
+          volumeMounts:
+{{- if include "dig" (list "gcp" "ai" "enabled" false .Values) }}
+{{- if include "needGcpAiSecret" . }}
+            - name: gcp-ai-credentials-secret-volume
+              mountPath: "/opt/secret/gcp-ai-credentials"
+              readOnly: true
+{{ end }}
+{{ end }}
+            {{- include "trustStoreVolumeMount" . | nindent 12 }}
+            {{- include "extraSecretVolumeMount" . | nindent 12 }}
+            {{- include "rabbitmqSecretVolumeMount" . | nindent 12 }}
+            {{- include "tempVolumeMount" . | nindent 12 }}
+
+          # hostPort: 80
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/design/actuator/health/readiness
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+{{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/design/actuator/health/liveness
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+{{- end }}
+
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+{{- if include "dig" (list "gcp" "ai" "enabled" false .Values) }}
+{{- if include "needGcpAiSecret" . }}
+        - name: gcp-ai-credentials-secret-volume
+          secret:
+            secretName: {{ .Release.Name }}-gcp-ai-credentials-secret
+            items:
+            - key: gcp-credentials
+              path: credentials
+{{- end }}
+{{- end }}
+{{- include "trustStoreVolume" . | nindent 8 }}
+{{- include "extraSecretVolume" . | nindent 8 }}
+{{- include "rabbitmqSecretVolume" . | nindent 8 }}
+{{- include "tempVolume" . | nindent 8 }}
+
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end}}

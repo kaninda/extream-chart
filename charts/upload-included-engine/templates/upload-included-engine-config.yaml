@@ -1,0 +1,33 @@
+{{- if and (or .Values.global.ondemand.enabled .Values.global.batch.enabled) .Values.global.dasdb.schema.autoManage.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-upload-included-engine-config
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "configMap") | nindent 4 }}
+data:
+  EXSTREAM_STORAGE_SHARED: {{ .Values.global.storage.shared.type }}
+  {{ if eq .Values.global.storage.shared.type "nfs" }}  
+  ENGINES_PATH: "/mnt/nfs/SYSTEM/cache/engines"
+  {{ end }}
+  {{ if eq .Values.global.storage.shared.type "s3" }}  
+  ENGINES_PATH: "share/SYSTEM/cache/engines"
+  LOCAL_BATCH_PATH: /tmp/docgen
+  LOCAL_DAS_RESOURCES_PATH: /tmp/docgen/dasresources
+  LOCAL_ENGINES_PATH: /tmp/docgen/SYSTEM/cache/engines
+  LOCAL_TENANTS_PATH: /tmp/docgen
+  {{ end }}
+  DAS_URL: "{{ include "DAS_URL_ROOT_BACKEND" . }}/api/v1"
+  {{ if .Values.debugger }}
+  EXSTREAM_DEBUG_FLAGS: "--inspect=0.0.0.0:9229"
+  NODE_DEBUG: request,http,http2
+  {{ end }}
+  {{- include "configMapNodeLogLevels" . | nindent 2 }}
+  {{- include "configMapLoggingConfig" . | nindent 2 }}
+  {{- include "getDocGenOtdsConfiguration" . | nindent 2 }}
+  {{- include "trustStoreConfigVariables" . | nindent 2 }}
+  {{- include "sharedStorageUmaskEnv" . | nindent 2 }}
+{{- end }}

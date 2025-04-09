@@ -1,0 +1,8 @@
+{{- if .Values.global.schema.upgrade.job.enabled }}
+{{- if .Values.db.schema.autoManage.enabled }}
+{{- if include "beginPreHookConfigAsset" . }}
+{{ include "migrator-config-template" . }}
+{{ include "endPreHookConfigAsset" . }}
+{{- end }}
+{{- end }}
+{{- end }}

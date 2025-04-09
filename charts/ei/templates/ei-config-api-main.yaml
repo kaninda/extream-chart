@@ -1,0 +1,1 @@
+{{ include "ei-config-api-template" . }}

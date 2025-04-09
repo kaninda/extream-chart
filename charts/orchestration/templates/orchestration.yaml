@@ -1,0 +1,224 @@
+{{- if .Values.global.orchestration.enabled -}}
+
+{{- $orcDockerImage := include "getOrcDockerImage" . -}}
+{{- $context := include "getFrontEndUrlContextWithLeadingSlash" . }}
+{{- $appLabelKey := "app" -}}
+{{- $appLabelValue := printf "%s-%s" .Release.Name .Chart.Name -}}
+{{- $containerName := include "getContainerName" (dict "dot" . "path" "deployment.container.name" "defaultValue" "orchestration") -}}  
+{{- $podName := "orchestration" -}}
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "getDeploymentName" (dict "dot" . "path" "deployment.name" "defaultValue" (print .Release.Name "-orchestration")) }}
+  {{- include "namespaceMetadata" . | nindent 2 }}
+  labels:
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+    azure.workload.identity/use: 'true'
+{{- end }}
+  annotations:
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "deployment") | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- include "deployment.strategy" . | nindent 4 }}
+  selector:
+    matchLabels:
+      {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 6 }}
+  template:
+    metadata:
+{{- if .Values.global.azure.keyVault.enabled }}
+      namespace: {{ include "getExstreamReleaseNamespace" . }}
+{{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/orchestration-config-main.yaml") . | sha256sum }}
+{{- if include "needDatabaseSecret" . }}
+        checksum/orcdb-secret: {{ include (print $.Template.BasePath "/orcdb-secret-main.yaml") . | sha256sum }}
+{{- end }}
+        {{- include "otdsClientChecksum" . | nindent 8 }}
+        {{- include "rabbitmqChecksum" . | nindent 8 }}
+        {{- include "trustStoreChecksum" . | nindent 8 }}
+{{ include "getExtraResourceAnnotations" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+      labels:
+        {{ $appLabelKey }}: {{ $appLabelValue }}
+{{ include "getJavaVersionLabels" . | nindent 8 }}
+{{ include "getExtraPodMatchLabels" (dict "dot" .) | nindent 8 }}
+{{ include "getExtraResourceLabels" (dict "dot" . "typeLabel" "pod") | nindent 8 }}
+{{- if .Values.global.azure.keyVault.enabled }}
+        azure.workload.identity/use: 'true'
+{{- end }}
+    spec:
+      {{- include "getNodeSelector" .Values | nindent 6 }}
+      {{- include "getServiceAccount" .Values | nindent 6 }}
+      {{- include "imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- include "sharedStorageRunAsIds" . | nindent 8 }}
+
+{{ if .Values.gracefulTerminationTimeout }}
+      terminationGracePeriodSeconds: {{ .Values.gracefulTerminationTimeout }}
+{{ end }}
+      {{ include "getTopologySpreadConstraints" (dict "Values" .Values "appLabelKey" $appLabelKey "appLabelValue" $appLabelValue) | nindent 6 }}
+      initContainers: # intentionally blank. Istio/anthos cannot support init containers.
+      containers:
+        - name: {{ $containerName }}
+          image: {{ $orcDockerImage }}
+          {{- include "imagePullPolicy" . | nindent 10 }}
+          securityContext:
+            {{- include "getReadOnlyRootFilesystemProperty" . | nindent 12 }}
+            {{- include "getDefaultSecurityContextProperties" . | nindent 12 }}
+          resources:
+            {{ .Values.resources.orchestration | toYaml | indent 12 | trim }}
+          envFrom:
+          - configMapRef:
+              name: {{ .Release.Name }}-orchestration-config
+          {{- include "newRelicConfigMapRef" . | nindent 10 }}
+          env:
+            {{- include "getWaitForEndpointsVar" (dict "dot" . "pod" $podName "endpoints" (printf "%s/version" (include "DAS_URL_ROOT_BACKEND" .) )) | nindent 12 }}
+            {{- include "getShutdownEndpointsVar" (dict "dot" . "pod" $podName) | nindent 12 }}
+            {{- include "getPodMetadataEnvVars" (dict "values" . "containerName" $containerName) | nindent 12 }}
+            {{- include "getS3Properties" . | nindent 12 }}
+  {{- if .Values.global.readOnlyRootFilesystem }}
+            - name: READ_ONLY_FILESYSTEM
+              value: "true"
+  {{- end }}            
+            - name: ENCRYPTION_DEFAULTKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: defaultKey
+            - name: ENCRYPTION_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-keys-secret
+                  key: keys
+            {{- include "trustStorePassword" . | nindent 12 }}
+            {{- include "extraEnvironmentVars" .Values | nindent 12 }}
+            {{- include "rabbitSecrets" . | nindent 12 }}
+{{- if include "needDatabaseSecret" . }}
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret
+                  key: system-schema-username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret
+                  key: system-schema-password
+{{- if .Values.global.orcdb.schema.autoManage.enabled }}
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret
+                  key: schema-management-username
+            - name: EXSTREAM_SCHEMA_MANAGEMENT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcdb-secret
+                  key: schema-management-password
+{{- end }}
+{{- end }}
+            {{- include "oauthEnvSecrets" . | nindent 12 }}
+  {{ if .Values.sqs.enabled }}
+            - name: EXSTREAM_ORC_SQS_KEYID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcsqs-secret
+                  key: sqs-keyid
+            - name: EXSTREAM_ORC_SQS_SECRETKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcsqs-secret
+                  key: sqs-secretkey
+  {{ end }}
+  {{ if .Values.azure.enabled }}
+            - name: EXSTREAM_ORC_AZURE_ACCESSKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Release.Name }}-orcazure-secret
+                  key: azure-accesskey
+  {{ end }}
+  {{ if .Values.gcs.enabled }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: "/opt/config/orcgcs/gcssecret"
+  {{ end }}
+  {{ if .Values.global.prometheus }}
+            - name: PROMETHEUS_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.prometheus.secretName }}
+                  key: {{ .Values.global.prometheus.secretKey }}
+  {{ end }}
+            {{- include "newRelicPodVariables" . | nindent 12 }}
+            {{- include "getAzureKeyVaultProperties" . | nindent 12 }}
+          volumeMounts:
+  {{ if .Values.storage.s3.testEnabled }}
+          - mountPath: /mnt/nfs
+            name: test-volume
+  {{ end }}
+  {{ if eq .Values.global.storage.shared.type "nfs"}}
+          - mountPath: "/mnt/nfs"
+            name: nfs-volume
+  {{ end }}
+  {{ if .Values.gcs.enabled }}
+          - name: orcgcs-secret-volume
+            mountPath: "/opt/config/orcgcs/"
+            readOnly: true
+  {{ end }}
+          {{- include "trustStoreVolumeMount" . | nindent 10 }}
+          {{- include "extraSecretVolumeMount" . | nindent 10 }}
+          {{- include "tempVolumeMount" . | nindent 10 }}
+          {{- include "rabbitmqSecretVolumeMount" . | nindent 10 }}
+          ports:
+            - containerPort: 8300
+            {{ if .Values.debugger}}
+            - containerPort: 9999
+            {{ end }}
+          readinessProbe:
+            httpGet:
+              path: {{$context}}/orchestration/version
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "readinessProbeSettings" . | indent 12 }}
+{{- if not .Values.debugger }}
+          livenessProbe:
+            httpGet:
+              path: {{$context}}/orchestration/version
+              port: {{ .Values.deployment.containerPort }}
+            {{- include "livenessProbeSettings" . | indent 12 }}
+{{- end }}
+          {{- include "extraContainerProperties" .Values | nindent 10 }}
+        {{- include "extraContainers" (dict "dot" . "pod" $podName) | nindent 8 }}
+
+      volumes:
+
+{{- include "trustStoreVolume" . | nindent 8 }}
+{{- include "extraSecretVolume" . | nindent 8 }}
+{{- include "tempVolume" . | nindent 8 }}
+{{- include "rabbitmqSecretVolume" . | nindent 8 }}
+{{ if .Values.storage.s3.testEnabled }}
+        - name: test-volume
+          emptyDir:
+{{ end }}
+{{ if .Values.gcs.enabled }}
+        - name: orcgcs-secret-volume
+          configMap:
+            name: {{ .Release.Name }}-orcgcs
+            items:
+            - key: gcssecret
+              path: gcssecret
+{{ end }}
+{{ if eq .Values.global.storage.shared.type "nfs"}}
+        - name: nfs-volume
+{{ if .Values.global.storage.shared.local.enabled }}
+          hostPath:
+            path: {{required "global.storage.shared.local.path required" .Values.global.storage.shared.local.path}}
+{{ else }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-shared-storage-pvc
+{{ end }}
+{{ end }}
+      {{- include "extraDeploymentProperties" .Values | nindent 6 }}
+
+{{- end }}
