@@ -1187,6 +1187,254 @@ encryption:
 ##########################
     
 bootstrap:
+  config:
+    otdsAdmin:
+      username: otadmin@otds.admin
+      password: otds
+
+    # should the bootstrap create the oauth clients in otds?
+    createOauthClients: true
+
+    # should bootstrap create schemas for existing tenants in new services?
+    fixPartialTenants: false
+
+    tenants:
+      system:
+        otds:
+
+          # Exstream admin user used to create exstream resources
+          exstreamAdmin:
+            username: tenantadmin@exstream.role
+            password: Exstream1!
+
+          # Otds partitions to create
+          partitions:
+            exstream.role:
+
+              #Groups in the partition
+              groups:
+                - name: tenantadmins
+                  members: [ otadmin@otds.admin ]
+
+              #users in the partition
+              users:
+                - username: tenantadmin
+                  password: Exstream1!
+                  membership: [ tenantadmins@exstream.role ]
+
+          authHandlers:
+            "http.negotiate":
+              status: false
+
+        # Design service configuration
+        das:
+          # Domains to create
+          domains:
+            - id: system
+              production: false
+
+              # Mappings between DAS roles and OTDS groups
+              roleMappings:
+                - role: superadmin
+                  groups: [ tenantadmins@exstream.role ]
+
+          # Das roles
+          roles:
+            - name: superadmin
+              appPermissions: [ COMM_DESIGNER, CONTENT_AUTHOR, DATA_MAPPER, DESIGNER_ASSET_MANAGER, ORCHESTRATOR, MONITOR, ORCHESTRATION_MANAGEMENT, MIGRATION_MANAGEMENT, EDIT_CATEGORIES ]
+              permissions:
+                - permissions: [ ALL ]
+                  types: [ all ]
+
+      sample234:
+        otds:
+          admin:
+            username: admin
+            password: Exstream1!
+
+          exstreamAdmin:
+            username: tenantadmin@exstream.role
+            password: Exstream1!
+
+          resources:
+            - name: SPS Resource for non-prod License
+              description: SPS Resource for DocGen non-prod Transactional Licenses
+              licenses:
+                - username:
+                  partition: exstream.role
+                  prodLicense: false
+                  name: Non Production License Key
+            - name: SPS Resource for prod License
+              description: SPS Resource for DocGen prod Transactional License
+              licenses:
+                - username:
+                  partition: exstream.role
+                  prodLicense: true
+                  name: Production License Key
+          partitions:
+            exstream.role:
+              groups:
+                - name: tenantadmins
+                - name: tenantusers
+                - name: reviewers
+                - name: browsers
+                - name: authors
+                - name: designers
+                - name: empoweradmins
+                - name: empowerintegrators
+                - name: empowereditors
+
+              clients:
+                - clientId: ExstreamEmpowerAdmin
+                  clientSecret: fes7tp8RoKQU7i1jHsDIL7u8J24f5Bk6
+                  membership: [ empoweradmins@exstream.role ]
+
+              users:
+                - username: orchestrationadmin
+                  password: Exstream1!
+                  membership: [ tenantadmins@exstream.role ]
+                - username: tenantbrowser
+                  password: Exstream1!
+                  membership: [ browsers@exstream.role ]
+                - username: tenantadmin
+                  password: Exstream1!
+                  membership: [ tenantadmins@exstream.role, empoweradmins@exstream.role ]
+                - username: tenantuser
+                  password: Exstream1!
+                  membership: [ tenantusers@exstream.role ]
+                - username: review
+                  password: Exstream1!
+                  membership: [ reviewers@exstream.role ]
+                - username: cce
+                  password: Exstream1!
+                  membership: [ tenantadmins@exstream.role, tenantusers@exstream.role ]
+                - username: designer
+                  password: Exstream1!
+                  membership: [ designers@exstream.role ]
+                - username: author
+                  password: Exstream1!
+                  membership: [ authors@exstream.role ]
+                - username: empoweradmin
+                  password: Exstream1!
+                  membership: [ empoweradmins@exstream.role ]
+                - username: empowerintegrator
+                  password: Exstream1!
+                  membership: [ empowerintegrators@exstream.role ]
+                - username: empowereditor
+                  password: Exstream1!
+                  membership: [ empowereditors@exstream.role ]
+        das:
+          # databaseInfo:
+          #   schema: exd_sample
+          #   username: exd_sample
+          #   password: cT62g.nG68
+
+          domains:
+            - id: Testdomain
+              production: false
+              roleMappings:
+                - role: superadmin
+                  groups: [ tenantadmins@exstream.role ]
+                - role: bcauser
+                  groups: [ authors@exstream.role ]
+                - role: commdesigner
+                  groups: [ designers@exstream.role ]
+                - role: tenantuser
+                  groups: [ tenantusers@exstream.role ]
+                - role: tenantadmin
+                  groups: [ tenantadmins@exstream.role ]
+                - role: reviewer
+                  groups: [ reviewers@exstream.role ]
+                - role: readonly
+                  groups: [ empoweradmins@exstream.role, empowereditors@exstream.role ]
+            - id: Proddomain
+              production: true
+              roleMappings:
+                - role: superadmin
+                  groups: [ tenantadmins@exstream.role ]
+                - role: bcauser
+                  groups: [ authors@exstream.role ]
+                - role: commdesigner
+                  groups: [ designers@exstream.role ]
+                - role: tenantuser
+                  groups: [ tenantusers@exstream.role ]
+                - role: tenantadmin
+                  groups: [ tenantadmins@exstream.role ]
+                - role: reviewer
+                  groups: [ reviewers@exstream.role ]
+                - role: readonly
+                  groups: [ empoweradmins@exstream.role, empowereditors@exstream.role ]
+          roles:
+            - name: superadmin
+              appPermissions: [ COMM_DESIGNER, CONTENT_AUTHOR, DATA_MAPPER, DESIGNER_ASSET_MANAGER, ORCHESTRATOR, MONITOR, ORCHESTRATION_MANAGEMENT,MIGRATION_MANAGEMENT, EDIT_CATEGORIES ]
+              permissions:
+                - permissions: [ ALL ]
+                  types: [ all ]
+            - name: bcauser
+              appPermissions: [ CONTENT_AUTHOR ]
+              permissions:
+                - permissions: [ CREATE, READ, WRITE, DELETE ]
+                  types: [ exstrdocument, exstrpage, exstrcomponentobj, exstremail, exstrvariablebase, exstrgraphicalmessage, exstrtextmessage, exstrparagraph, exstrparagraphsection, exstrhtml5, image, samplefile, resourcepack, exstrpackage, exstrdatasource, versionedtemplate, enginerundef, documentdefinition, exstrapplication, exstrbarcode, exstrpapertype ]
+            - name: commdesigner
+              appPermissions: [ COMM_DESIGNER ]
+              permissions:
+                - permissions: [ CREATE, READ, WRITE ]
+                  types: [ exstrdocument, exstrpage, exstrcomponentobj, exstremail, exstrvariablebase, exstrgraphicalmessage, exstrtextmessage, exstrparagraph, exstrparagraphsection, exstrhtml5, documentdefinition, image, resourcepack, exstrpackage, exstrdatasource, versionedtemplate, enginerundef, samplefile, exstrapplication, exstrbarcode, exstrpapertype ]
+            - name: reviewer
+              appPermissions: [ CONTENT_AUTHOR,COMM_DESIGNER,ORCHESTRATOR ]
+              permissions:
+                - permissions: [ APPROVE ]
+                  types: [ all ]
+            - name: tenantadmin
+              appPermissions: [ ALL ]
+              permissions:
+                - permissions: [ ALL ]
+                  types: [ all ]
+            - name: tenantuser
+              appPermissions: [ ALL ]
+              permissions:
+                - permissions: [ CREATE, READ, WRITE, DELETE ]
+                  types: [ all ]
+            - name: readonly
+              appPermissions: [ ]
+              permissions:
+                - permissions: [ READ ]
+                  types: [ all ]
+
+        # Provide tenant username/schema/password if applicable
+        # orchestration:
+        #   databaseInfo:
+        #     schema: exo_sample
+        #     username: exo_sample
+        #     password: bK.8d!6fDy
+
+        # Provide tenant username/schema/password if applicable
+        # empower:
+        #   databaseInfo:
+        #     schema: exe_sample
+        #     username: exe_sample
+        #     password: kZ69gh.x4h
+
+        # Provide tenant username/schema/password if applicable
+        # ei:
+        #   databaseInfo:
+        #     schema: exi_test
+        #     username: exi_test
+        #     password: Exstream1!
+
+        # Provide tenant username/schema/password if applicable
+        # eep:
+        #   databaseInfo:
+        #     schema: eep_test
+        #     username: eep_test
+        #     password: Exstream1!
+
+        # Provide tenant username/schema/password if applicable
+        # rationalization:
+        #   databaseInfo:
+        #     schema: exi_test
+        #     username: exi_test
+        #     password: Exstream1!
   activeDeadlineSeconds: 360
   ## Specify a custom bootstrap configuration
   #config: {}
