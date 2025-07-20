@@ -121,6 +121,8 @@ global:
     # The OTDS URL that ExstreamCE services should pass to clients, such as on login redirects.
     externalFrontEnd: http://xx.xx.xx.xx:8080
     oauth2:
+      clientId: otds-clientId
+      clientSecret: CYYGd8mXfE52l9238
 
   # Support for Istio virtual services for Exstream applications.
   istio:
@@ -201,16 +203,17 @@ global:
 
       ## Should the design service be responsible for managing the database schema?
       autoManage:
-        enabled: true
+        enabled: false
         username: 
         password: 
 
     ## Connection information to the design database
     externalDb:
+      enabled: true
       # The type of database.  Possible values: SQLSERVER | ORACLE | POSTGRES
       dbType: POSTGRES
-      username: 
-      password: 
+      username: "dasUser"
+      password: "dasPass"
       url: jdbc:postgresql://localhost:5432/exstream
       #url: "jdbc:sqlserver://localhost:1433;databaseName=exstream"
       #url: "jdbc:oracle:thin:@//localhost:1521/XE"
@@ -235,16 +238,18 @@ global:
 
       ## Should the orchestration service be responsible for managing the database schema?
       autoManage:
-        enabled: true
+        enabled: false
         username: 
         password: 
 
     ## Connection information to the orchestration database
     externalDb:
       # The type of database.  Possible values: SQLSERVER | ORACLE | POSTGRES
+      enabled: true
       dbType: POSTGRES
-      username: 
-      password: 
+      dbName: "orcdb"
+      username: "orcuser"
+      password: "orcpass"
       url: jdbc:postgresql://localhost:5432/exstream
       #url: "jdbc:sqlserver://localhost:1433;databaseName=exstream"
       #url: "jdbc:oracle:thin:@//localhost:1521/XE"
@@ -262,6 +267,7 @@ global:
         # combined Vault secret engine and role path information to be used for schema management operations
         schema:
   ## Empower service database connection information
+
   empowerdb:
     schema:
       prefix: ""
@@ -430,18 +436,17 @@ global:
     memory:
       sizeLimit: 64Mi
 
-
   ## RabbitMQ queue information
   rabbitmq:
     # The hostname for the rabbitmq service.  Example: exstream-rabbitmq.default.svc
-    host:
+    host: "rabbitmq.local"
     # The port for the rabbitmq service. Defaults to 5672.
-    port:
+    port: 5672
     # Optional virtual host to use in the rabbitmq service.
     vhost:
     # Credentials used by Exstream services to authenticate to rabbit service, and by a system admin to access the rabbit administrative console.
-    username: 
-    password: 
+    username: "guest"
+    password: "guest"
     # Specify a common prefix for all rabbitmq queues used by ExstreamCE.
     queue:
       namePrefix: exstream
